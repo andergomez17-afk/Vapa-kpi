@@ -170,14 +170,14 @@ def clean_pdf_text(text):
     return str(text).encode('latin-1', 'replace').decode('latin-1')
 
 # ==============================================================================
-# 4. GENERADOR DE PDF OPERATIVO ACTUALIZADO (Orden Lógico y de Mayor a Menor)
+# 4. GENERADOR DE PDF OPERATIVO AVANZADO
 # ==============================================================================
 def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_estacion, en_ruta, count_falta_44, df_criticos, total_compromiso):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
     
-    # --- ENCABEZADO CORPORATIVO ---
+    # Encabezado Morado
     pdf.set_fill_color(77, 20, 140) 
     pdf.rect(0, 0, 210, 35, 'F')
     
@@ -202,7 +202,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_e
     pdf.line(10, 50, 200, 50)
     pdf.ln(5)
     
-    # --- SECCIÓN 1: KPIs SOBRE COMPROMISOS ---
+    # KPIs sobre compromisos
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, txt="1. INDICADORES DE RENDIMIENTO (SOBRE COMPROMISOS VENCIDOS O DE HOY)", ln=True)
@@ -214,7 +214,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_e
         pct_exito, pct_fallando = 0, 0
         
     pdf.set_font("Arial", '', 10)
-    
     pdf.cell(80, 8, txt=f"Compromisos a Tiempo ({pct_exito}%):")
     pdf.set_fill_color(220, 220, 220)
     pdf.rect(90, pdf.get_y() + 2, 100, 4, 'F')
@@ -229,7 +228,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_e
     pdf.rect(90, pdf.get_y() + 2, int(pct_fallando), 4, 'F')
     pdf.ln(12)
 
-    # --- SECCIÓN 2: RESUMEN VOLUMÉTRICO (NUEVO ORDEN) ---
+    # Resumen Volumétrico
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, txt="2. RESUMEN VOLUMETRICO DE BULTOS", ln=True)
@@ -248,22 +247,19 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_e
     pdf.cell(145, 8, txt="  ESTADO LOGISTICO", border=1, fill=True)
     pdf.cell(45, 8, txt="CANTIDAD", border=1, fill=True, align='C', ln=True)
 
-    # 1. Total y en Ruta
     add_row("Total Procesados (Llegaron Hoy a la Estacion)", total, (255, 255, 255), (0, 0, 0))
     add_row("Bultos en Ruta (Carga Asignada en VAN)", en_ruta, (230, 250, 230), (0, 128, 64))
     
-    # 2. Clientes Dinámicos de Mayor a Menor
     for cli in clientes_ordenados:
         if cli['nombre'] == 'Tricot':
             add_row(f"Ingreso Cliente {cli['nombre']}", cli['cantidad'], (255, 245, 235), (255, 102, 0))
         else:
             add_row(f"Ingreso Cliente {cli['nombre']}", cli['cantidad'], (245, 235, 255), (77, 20, 140))
             
-    # 3. Resumen de Estación y Fallos
     add_row("Bultos en la Estacion (Fallando Compromiso)", bultos_estacion, (235, 235, 235), (50, 50, 50))
     add_row("Falta Stat 44 y Aplazar (Fallando sin Escaneo)", count_falta_44, (255, 230, 230), (200, 0, 0))
     
-    # --- SECCIÓN 3: ANEXO DE ACCIÓN RÁPIDA ---
+    # Anexo Tabla Roja
     def imprimir_cabecera_tabla_roja():
         pdf.set_fill_color(200, 0, 0)
         pdf.set_text_color(255, 255, 255)
@@ -282,7 +278,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_e
         pdf.ln(4)
         
         imprimir_cabecera_tabla_roja()
-        
         pdf.set_text_color(0, 0, 0)
         pdf.set_font("Arial", '', 8)
         
@@ -352,7 +347,10 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
-    # --- CÁLCULO GENERAL DE VARIABLES ---
+    # Inicializar variable para el botón de ver fallos si no existe
+    if "ver_fallos_kpi" not in st.session_state:
+        st.session_state.ver_fallos_kpi = False
+        
     total_ingreso = len(df_vapa)
     
     if 'VAN All' in df_vapa.columns:
@@ -378,12 +376,15 @@ if st.session_state.history:
     else:
         pct_exito, pct_fallando = 0, 0
 
-    # --- RENDERIZADO DE KPIs PRINCIPALES (NUEVO VISUAL) ---
+    cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
+    cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
+
+    # --- KPIs PRINCIPALES ---
     st.markdown("### 📊 Indicadores de Rendimiento (Compromisos de Hoy)")
     col_kpi1, col_kpi2 = st.columns(2)
     with col_kpi1:
         st.markdown(f"""
-            <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #00AA50; margin-bottom: 15px;'>
+            <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #00AA50; margin-bottom: 5px;'>
                 <span style='color:#A0A0A0; font-size:12px; text-transform:uppercase;'>Compromisos a Tiempo</span><br>
                 <span style='color:#FFFFFF; font-size:28px; font-weight:bold;'>{pct_exito}%</span>
                 <div style='background-color:#2F2F2F; border-radius:5px; margin-top:5px; height:8px; width:100%;'>
@@ -391,9 +392,10 @@ if st.session_state.history:
                 </div>
             </div>
         """, unsafe_allow_html=True)
+        st.write("") # Espaciador simétrico
     with col_kpi2:
         st.markdown(f"""
-            <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #E63946; margin-bottom: 15px;'>
+            <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #E63946; margin-bottom: 5px;'>
                 <span style='color:#A0A0A0; font-size:12px; text-transform:uppercase;'>Fallando Compromiso (En Estación)</span><br>
                 <span style='color:#FFFFFF; font-size:28px; font-weight:bold;'>{pct_fallando}%</span>
                 <div style='background-color:#2F2F2F; border-radius:5px; margin-top:5px; height:8px; width:100%;'>
@@ -401,12 +403,23 @@ if st.session_state.history:
                 </div>
             </div>
         """, unsafe_allow_html=True)
-    
+        
+        # BOTÓN INTERACTIVO PARA DESPLEGAR DETALLES DEL KPI FALLIDO
+        if st.button("🔍 Ver Bultos que Afectan este %", use_container_width=True):
+            st.session_state.ver_fallos_kpi = not st.session_state.ver_fallos_kpi
+
+    # DESPLIEGUE DINÁMICO DE BULTOS DETENIDOS SI EL BOTÓN FUE CLICKEADO
+    if st.session_state.ver_fallos_kpi:
+        st.error("🚨 Carga en Estación que está Provocando el Incumplimiento del KPI:")
+        if bultos_estacion_total > 0:
+            st.dataframe(df_bodega[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+        else:
+            st.write("No hay registros que afecten el compromiso.")
+
     st.divider()
     
     st.markdown("### 📥 Volumen Diario y Clientes")
 
-    # --- CÁLCULO Y ORDENAMIENTO DE CLIENTES ---
     if not df_vapa.empty:
         filas_unidas = pd.Series("", index=df_vapa.index)
         for col in df_vapa.columns:
@@ -430,11 +443,9 @@ if st.session_state.history:
     c_chart, c_metrics = st.columns([2, 1])
     
     with c_metrics:
-        # Fijos Arriba
         st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#8D99AE;'><span class='metric-title' style='font-size:11px;'>1. Total Llegaron Hoy</span><span class='metric-value' style='font-size:20px;'>{total_ingreso}</span></div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#06D6A0;'><span class='metric-title' style='font-size:11px;'>2. En Ruta (VAN)</span><span class='metric-value' style='font-size:20px; color:#06D6A0;'>{m_en_ruta}</span></div>", unsafe_allow_html=True)
         
-        # Dinámicos Abajo (Ordenados de Mayor a Menor)
         for cli in clientes_ordenados:
             st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:{cli['color']};'><span class='metric-title' style='font-size:11px;'>{cli['nombre']}</span><span class='metric-value' style='font-size:20px; color:{cli['color']};'>{cli['cantidad']}</span></div>", unsafe_allow_html=True)
 
@@ -445,27 +456,21 @@ if st.session_state.history:
         
         df_ingreso = pd.DataFrame({"Categoría": cat_names, "Cantidad": cat_counts, "Color": cat_colors})
         
-        # Gráfico estático sin zoom ni barra de herramientas
         fig_ingreso = px.bar(df_ingreso, x="Categoría", y="Cantidad", text="Cantidad", 
                              color="Categoría", color_discrete_sequence=df_ingreso["Color"].tolist(),
                              template="plotly_dark", title="Distribución de Ingreso Relevante")
         fig_ingreso.update_layout(
-            showlegend=False, 
-            height=380, 
-            margin=dict(l=0, r=0, t=40, b=0), 
-            plot_bgcolor='rgba(0,0,0,0)', 
-            paper_bgcolor='rgba(0,0,0,0)',
-            dragmode=False  # Bloquea el arrastre y selección
+            showlegend=False, height=380, margin=dict(l=0, r=0, t=40, b=0), 
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            dragmode=False
         )
-        fig_ingreso.update_xaxes(fixedrange=True) # Bloquea zoom en X
-        fig_ingreso.update_yaxes(fixedrange=True) # Bloquea zoom en Y
-        
-        # displayModeBar=False quita los botones flotantes de plotly
+        fig_ingreso.update_xaxes(fixedrange=True)
+        fig_ingreso.update_yaxes(fixedrange=True)
         st.plotly_chart(fig_ingreso, use_container_width=True, config={'displayModeBar': False})
 
     st.divider()
 
-    # --- LÓGICA DE EXCEPCIONES RESTANTES ---
+    # --- LÓGICA DE FILTRADOS RESTANTES ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
@@ -488,11 +493,7 @@ if st.session_state.history:
         has_dex = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07', regex=True, na=False)
         
     df_falta_44 = df_bodega[~has_stat & ~has_dex]
-    
     m_50, m_53, m_44, count_falta_44 = len(df_50), len(df_53), len(df_44), len(df_falta_44)
-    
-    cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
-    cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
     
     tab1, tab2, tab3 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo"])
     
@@ -528,8 +529,6 @@ if st.session_state.history:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         
