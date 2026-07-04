@@ -40,9 +40,10 @@ st.markdown("""
     .metric-title { font-size: 14px; color: #A0A0A0; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; display: block; }
     .metric-value { font-size: 32px; font-weight: 900; color: #FFFFFF; display: block; }
     
-    .login-box {
-        max-width: 400px; margin: 40px auto; padding: 35px; 
+    [data-testid="stForm"] {
+        max-width: 400px; margin: 60px auto; padding: 35px; 
         background-color: #1A1A1A; border-radius: 15px; 
+        border: none;
         border-top: 5px solid #4D148C; border-bottom: 5px solid #FF6600;
         box-shadow: 0px 10px 30px rgba(0,0,0,0.8);
     }
@@ -58,38 +59,36 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CAPA DE SEGURIDAD (LOGIN OPTIMIZADO)
+# 2. CAPA DE SEGURIDAD (LOGIN INTEGRADO EN CAJA)
 # ==============================================================================
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
 
     if not st.session_state["password_correct"]:
-        st.markdown("<div class='login-box'>", unsafe_allow_html=True)
-        
-        # Centrar logo e integrar el nombre FedEx VAPA con los colores exactos
-        c1, c2, c3 = st.columns([1, 2, 1])
-        with c2:
-            st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/FedEx_Express_logo.svg/512px-FedEx_Express_logo.svg.png", use_container_width=True)
-        
-        st.markdown("""
-            <h2 style='text-align: center; margin-top: 10px; margin-bottom: 5px;'>
-                <span style='color: #4D148C; font-weight: 900;'>FedEx</span> 
-                <span style='color: #FF6600; font-weight: 900;'>VAPA</span>
-            </h2>
-            <p style='text-align: center; color: #A0A0A0; font-size: 14px; margin-bottom: 20px;'>
-                Control de Operaciones e Inventario
-            </p>
-        """, unsafe_allow_html=True)
-        
-        pwd = st.text_input("Clave de Acceso", type="password", placeholder="Ingresa la credencial...")
-        if st.button("Iniciar Sesión"):
-            if pwd == "Vapa2026": 
-                st.session_state["password_correct"] = True
-                st.rerun()
-            else:
-                st.error("❌ Credencial denegada. Verifica tu clave.")
-        st.markdown("</div>", unsafe_allow_html=True)
+        with st.form("login_form"):
+            st.markdown("""
+                <div style='text-align: center; padding-bottom: 10px;'>
+                    <img src='https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/FedEx_Express_logo.svg/512px-FedEx_Express_logo.svg.png' width='140' style='margin-bottom: 15px;'>
+                    <h2 style='margin-top: 0px; margin-bottom: 5px;'>
+                        <span style='color: #4D148C; font-weight: 900;'>FedEx</span> 
+                        <span style='color: #FF6600; font-weight: 900;'>VAPA</span>
+                    </h2>
+                    <p style='color: #A0A0A0; font-size: 14px; margin-bottom: 0px;'>
+                        Control de Operaciones e Inventario
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            pwd = st.text_input("Clave de Acceso", type="password", placeholder="Ingresa la credencial...")
+            submitted = st.form_submit_button("Iniciar Sesión")
+            
+            if submitted:
+                if pwd == "Vapa2026": 
+                    st.session_state["password_correct"] = True
+                    st.rerun()
+                else:
+                    st.error("❌ Credencial denegada. Verifica tu clave.")
         return False
     return True
 
@@ -178,9 +177,42 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
+    # --- NUEVA SECCIÓN SUPERIOR: DATOS DE INGRESO DIARIO ---
+    st.markdown("### 📥 Ingreso Diario y Clientes Clave")
+    
+    total_ingreso = len(df_vapa)
+    if 'Shipper Name' in df_vapa.columns:
+        tricot_count = df_vapa[df_vapa['Shipper Name'].astype(str).str.contains('Tricot', case=False, na=False)].shape[0]
+        intercarry_count = df_vapa[df_vapa['Shipper Name'].astype(str).str.contains('Intercarry', case=False, na=False)].shape[0]
+        ahumada_count = df_vapa[df_vapa['Shipper Name'].astype(str).str.contains('Farmacias Ahumada', case=False, na=False)].shape[0]
+    else:
+        tricot_count, intercarry_count, ahumada_count = 0, 0, 0
+
+    c_chart, c_metrics = st.columns([2, 1])
+    
+    with c_metrics:
+        st.markdown(f"<div class='metric-box' style='padding: 10px; margin-bottom: 8px; border-bottom-color:#8D99AE;'><span class='metric-title' style='font-size:11px;'>Total Llegaron Hoy</span><span class='metric-value' style='font-size:22px;'>{total_ingreso}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box' style='padding: 10px; margin-bottom: 8px; border-bottom-color:#FF6600;'><span class='metric-title' style='font-size:11px;'>Tricot</span><span class='metric-value' style='font-size:22px; color:#FF6600;'>{tricot_count}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box' style='padding: 10px; margin-bottom: 8px; border-bottom-color:#4D148C;'><span class='metric-title' style='font-size:11px;'>Intercarry</span><span class='metric-value' style='font-size:22px; color:#4D148C;'>{intercarry_count}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box' style='padding: 10px; margin-bottom: 8px; border-bottom-color:#4D148C;'><span class='metric-title' style='font-size:11px;'>Farmacias Ahumada</span><span class='metric-value' style='font-size:22px; color:#4D148C;'>{ahumada_count}</span></div>", unsafe_allow_html=True)
+
+    with c_chart:
+        df_ingreso = pd.DataFrame({
+            "Categoría": ["Total General", "Tricot", "Intercarry", "Farm. Ahumada"],
+            "Cantidad": [total_ingreso, tricot_count, intercarry_count, ahumada_count],
+            "Color": ["#8D99AE", "#FF6600", "#4D148C", "#4D148C"]
+        })
+        fig_ingreso = px.bar(df_ingreso, x="Categoría", y="Cantidad", text="Cantidad", 
+                             color="Categoría", color_discrete_sequence=df_ingreso["Color"].tolist(),
+                             template="plotly_dark", title="Distribución de Ingreso Relevante")
+        fig_ingreso.update_layout(showlegend=False, height=320, margin=dict(l=0, r=0, t=40, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+        st.plotly_chart(fig_ingreso, use_container_width=True)
+
+    st.divider() # Separador antes de las métricas de excepciones
+
+    # --- LÓGICA DE FILTROS ACTUALIZADA (Sin DEX 17) ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
-    df_17 = df_vapa[df_vapa['DEX All'].astype(str).str.contains('DEX\\[17\\]', na=False)] if 'DEX All' in df_vapa.columns else pd.DataFrame()
     
     if 'STAT 44 Date Time Latest' in df_vapa.columns:
         filtro_44 = df_vapa['STAT 44 Date Time Latest'].notna() & (df_vapa['VAN All'].isna() | (df_vapa['VAN All'].astype(str).str.strip() == ""))
@@ -190,7 +222,7 @@ if st.session_state.history:
     else:
         df_44 = pd.DataFrame()
     
-    m_50, m_53, m_17, m_44, sin_mov = len(df_50), len(df_53), len(df_17), len(df_44), len(df_bodega)
+    m_50, m_53, m_44, sin_mov = len(df_50), len(df_53), len(df_44), len(df_bodega)
     cols_to_check = ['Tracking Number', 'Shipper Name', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
     
@@ -198,7 +230,9 @@ if st.session_state.history:
     
     with tab1:
         st.markdown("### Resumen de Excepciones e Inventario")
-        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        # Reducido a 4 columnas porque se eliminó el DEX 17
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1: 
             st.markdown(f"<div class='metric-box'><span class='metric-title'>STAT 50</span><span class='metric-value' style='color:#FF6600;'>{m_50}</span></div>", unsafe_allow_html=True)
@@ -216,22 +250,18 @@ if st.session_state.history:
                 if m_44 > 0: st.dataframe(df_44[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                 else: st.write("Sin registros.")
         with col4: 
-            st.markdown(f"<div class='metric-box'><span class='metric-title'>DEX 17</span><span class='metric-value' style='color:#A0A0A0;'>{m_17}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver Bultos"): 
-                if m_17 > 0: st.dataframe(df_17[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Sin registros.")
-        with col5: 
             st.markdown(f"<div class='metric-box' style='border-bottom-color:#4D148C;'><span class='metric-title'>En Estación</span><span class='metric-value' style='color:#4D148C;'>{sin_mov}</span></div>", unsafe_allow_html=True)
             with st.expander("👁️ Ver Bultos"): 
                 if sin_mov > 0: st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                 else: st.write("Sin registros.")
 
-        chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "DEX 17", "En Estación"], "Bultos": [m_50, m_53, m_44, m_17, sin_mov], "Color": ["#FF6600", "#FF6600", "#FF6600", "#8D99AE", "#4D148C"]})
+        # Gráfico actualizado sin DEX 17
+        chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "En Estación"], "Bultos": [m_50, m_53, m_44, sin_mov], "Color": ["#FF6600", "#FF6600", "#FF6600", "#4D148C"]})
         fig = px.bar(chart_data, x="Categoría", y="Bultos", text="Bultos", color="Categoría", color_discrete_sequence=chart_data["Color"].tolist(), template="plotly_dark")
         fig.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=30, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
 
-# --- PESTAÑA 2: BASE DE DATOS ---
+    # --- PESTAÑA 2: BASE DE DATOS ---
     with tab2:
         st.markdown("### Motor de Búsqueda y Filtrado")
         c_search, c_filter = st.columns([3, 1])
@@ -249,6 +279,7 @@ if st.session_state.history:
 
         st.dataframe(display_df.style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True, height=500)
 
+    # --- PESTAÑA 3: CONTROL DE ENVEJECIMIENTO ---
     with tab3:
         st.markdown("### Control de Envejecimiento (≥ 3 días)")
         tracking_history = {}
