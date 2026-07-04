@@ -91,7 +91,7 @@ with col_logo:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/FedEx_Express_logo.svg/512px-FedEx_Express_logo.svg.png", width=100)
 with col_titulo:
     st.markdown("<h1 style='margin-bottom: 0px;'>Monitoreo de Almacén</h1>", unsafe_allow_html=True)
-    st.caption("Valparaíso Operations | Monitor de Excepciones y Auditoría de Piso")
+    st.caption("Valparaíso Operations | Monitor de Excepciones y Base de Datos")
 with col_salir:
     st.write("") 
     if st.button("🚪 Salir"):
@@ -165,16 +165,25 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
+    # --- LÓGICA DE FILTROS ACTUALIZADA ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     df_17 = df_vapa[df_vapa['DEX All'].astype(str).str.contains('DEX\\[17\\]', na=False)] if 'DEX All' in df_vapa.columns else pd.DataFrame()
-    df_44 = df_vapa[df_vapa['STAT 44 Date Time Latest'].notna() & (df_vapa['VAN All'].isna())] if 'STAT 44 Date Time Latest' in df_vapa.columns else pd.DataFrame()
+    
+    # NUEVO: Filtro para "Solo STAT 44" excluyendo bultos que ya tienen DEX 17
+    if 'STAT 44 Date Time Latest' in df_vapa.columns:
+        filtro_44 = df_vapa['STAT 44 Date Time Latest'].notna() & (df_vapa['VAN All'].isna() | (df_vapa['VAN All'].astype(str).str.strip() == ""))
+        if 'DEX All' in df_vapa.columns:
+            filtro_44 = filtro_44 & (~df_vapa['DEX All'].astype(str).str.contains('DEX\\[17\\]', na=False))
+        df_44 = df_vapa[filtro_44]
+    else:
+        df_44 = pd.DataFrame()
     
     m_50, m_53, m_17, m_44, sin_mov = len(df_50), len(df_53), len(df_17), len(df_44), len(df_bodega)
     cols_to_check = ['Tracking Number', 'Shipper Name', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
     
-    tab1, tab2, tab3 = st.tabs(["📊 Panel Operativo", "📋 Auditoría de Piso", "🚨 Alertas de Riesgo"])
+    tab1, tab2, tab3 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo"])
     
     with tab1:
         st.markdown("### Resumen de Excepciones e Inventario")
@@ -211,6 +220,7 @@ if st.session_state.history:
         fig.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=30, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
 
+    # --- PESTAÑA 2: BASE DE DATOS ---
     with tab2:
         st.markdown("### Motor de Búsqueda y Filtrado")
         c_search, c_filter = st.columns([3, 1])
@@ -245,3 +255,4 @@ if st.session_state.history:
 
 else:
     st.info("👋 ¡Hola! Despliega el menú lateral y adjunta el archivo generado por DREUI para empezar.")
+            
