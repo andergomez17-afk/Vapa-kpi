@@ -67,9 +67,13 @@ def check_password():
 
     if not st.session_state["password_correct"]:
         with st.form("login_form"):
+            # Usamos st.columns y st.image en lugar de HTML para evitar el ícono roto
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/FedEx_Express_logo.svg/512px-FedEx_Express_logo.svg.png", use_container_width=True)
+            
             st.markdown("""
                 <div style='text-align: center; padding-bottom: 10px;'>
-                    <img src='https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/FedEx_Express_logo.svg/512px-FedEx_Express_logo.svg.png' width='140' style='margin-bottom: 15px;'>
                     <h2 style='margin-top: 0px; margin-bottom: 5px;'>
                         <span style='color: #4D148C; font-weight: 900;'>FedEx</span> 
                         <span style='color: #FF6600; font-weight: 900;'>VAPA</span>
@@ -142,7 +146,6 @@ class VapaEngine:
             return None, None
 
 def color_fedex_cliente(row):
-    # Unifica toda la fila en un solo texto para buscar en cualquier columna
     fila_str = ' '.join(row.astype(str)).upper()
     color = ''
     
@@ -182,14 +185,13 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
-    # --- NUEVA SECCIÓN SUPERIOR: DATOS DE INGRESO DIARIO (Búsqueda Global en toda la fila) ---
     st.markdown("### 📥 Ingreso Diario y Clientes Clave")
     
     total_ingreso = len(df_vapa)
     
     if not df_vapa.empty:
-        # Crea un solo bloque de texto por fila para evitar contar el mismo bulto doble
-        filas_unidas = df_vapa.astype(str).agg(' '.join, axis=1).str.upper()
+        # Solución al TypeError: usar apply() con lambda en lugar de agg()
+        filas_unidas = df_vapa.astype(str).apply(lambda row: ' '.join(row.values), axis=1).str.upper()
         
         tricot_count = filas_unidas.str.contains('TRICOT', na=False).sum()
         socofar_count = filas_unidas.str.contains('CRUZ VERDE|MAICAO|INTERCARRY|SOCOFAR', na=False).sum()
@@ -221,7 +223,6 @@ if st.session_state.history:
 
     st.divider()
 
-    # --- LÓGICA DE FILTROS DE EXCEPCIONES ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
