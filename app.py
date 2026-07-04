@@ -182,19 +182,29 @@ if st.session_state.history:
         
         with col1: 
             st.markdown(f"<div class='metric-box'><span class='metric-title'>STAT 50</span><span class='metric-value' style='color:#FF6600;'>{m_50}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver Bultos"): st.dataframe(df_50[cols_to_show].style.apply(color_fedex_cliente, axis=1), hide_index=True) if m_50 > 0 else st.write("Sin registros.")
+            with st.expander("👁️ Ver Bultos"): 
+                if m_50 > 0: st.dataframe(df_50[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                else: st.write("Sin registros.")
         with col2: 
             st.markdown(f"<div class='metric-box'><span class='metric-title'>STAT 53</span><span class='metric-value' style='color:#FF6600;'>{m_53}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver Bultos"): st.dataframe(df_53[cols_to_show].style.apply(color_fedex_cliente, axis=1), hide_index=True) if m_53 > 0 else st.write("Sin registros.")
+            with st.expander("👁️ Ver Bultos"): 
+                if m_53 > 0: st.dataframe(df_53[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                else: st.write("Sin registros.")
         with col3: 
             st.markdown(f"<div class='metric-box'><span class='metric-title'>Solo STAT 44</span><span class='metric-value' style='color:#FF6600;'>{m_44}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver Bultos"): st.dataframe(df_44[cols_to_show].style.apply(color_fedex_cliente, axis=1), hide_index=True) if m_44 > 0 else st.write("Sin registros.")
+            with st.expander("👁️ Ver Bultos"): 
+                if m_44 > 0: st.dataframe(df_44[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                else: st.write("Sin registros.")
         with col4: 
             st.markdown(f"<div class='metric-box'><span class='metric-title'>DEX 17</span><span class='metric-value' style='color:#A0A0A0;'>{m_17}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver Bultos"): st.dataframe(df_17[cols_to_show].style.apply(color_fedex_cliente, axis=1), hide_index=True) if m_17 > 0 else st.write("Sin registros.")
+            with st.expander("👁️ Ver Bultos"): 
+                if m_17 > 0: st.dataframe(df_17[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                else: st.write("Sin registros.")
         with col5: 
             st.markdown(f"<div class='metric-box' style='border-bottom-color:#4D148C;'><span class='metric-title'>En Estación</span><span class='metric-value' style='color:#4D148C;'>{sin_mov}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver Bultos"): st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1), hide_index=True) if sin_mov > 0 else st.write("Sin registros.")
+            with st.expander("👁️ Ver Bultos"): 
+                if sin_mov > 0: st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                else: st.write("Sin registros.")
 
         chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "DEX 17", "En Estación"], "Bultos": [m_50, m_53, m_44, m_17, sin_mov], "Color": ["#FF6600", "#FF6600", "#FF6600", "#8D99AE", "#4D148C"]})
         fig = px.bar(chart_data, x="Categoría", y="Bultos", text="Bultos", color="Categoría", color_discrete_sequence=chart_data["Color"].tolist(), template="plotly_dark")
@@ -216,7 +226,7 @@ if st.session_state.history:
             elif 'Status' in display_df.columns: display_df = display_df[display_df['Status'].astype(str).str.upper() == 'SIP']
         if search_query: display_df = display_df[display_df['Tracking Number'].astype(str).str.contains(search_query)]
 
-        st.dataframe(display_df.style.apply(color_fedex_cliente, axis=1), use_container_width=True, hide_index=True, height=500)
+        st.dataframe(display_df.style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True, height=500)
 
     with tab3:
         st.markdown("### Control de Envejecimiento (≥ 3 días)")
