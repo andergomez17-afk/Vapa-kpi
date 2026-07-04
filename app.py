@@ -270,10 +270,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, tricot, bultos_estacion, en_
         pdf.set_font("Arial", 'B', 14)
         pdf.set_text_color(200, 0, 0) 
         pdf.cell(0, 10, txt="ANEXO: BULTOS CRITICOS (FALTA STAT 44 Y APLAZAR)", ln=True)
-        
-        pdf.set_font("Arial", 'I', 10)
-        pdf.set_text_color(50, 50, 50)
-        pdf.cell(0, 6, txt="Listado con compromiso fallando y sin ningun movimiento (44, 53, 50, 37, 27, DEX 03/07):", ln=True)
         pdf.ln(4)
         
         imprimir_cabecera_tabla_roja()
@@ -347,6 +343,18 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
+    # --- CÁLCULO GENERAL DE VARIABLES ---
+    total_ingreso = len(df_vapa)
+    
+    if 'VAN All' in df_vapa.columns:
+        filtro_en_ruta = df_vapa['VAN All'].notna() & (df_vapa['VAN All'].astype(str).str.strip() != "")
+        df_en_ruta = df_vapa[filtro_en_ruta]
+    else:
+        df_en_ruta = pd.DataFrame()
+    m_en_ruta = len(df_en_ruta)
+    
+    bultos_estacion_total = len(df_bodega)
+    
     if 'Commit Date' in df_vapa.columns:
         fechas_entrega_vapa = pd.to_datetime(df_vapa['Commit Date'], errors='coerce').dt.date
         filtro_compromiso_vapa = fechas_entrega_vapa.isna() | (fechas_entrega_vapa <= datetime.now().date())
@@ -354,10 +362,42 @@ if st.session_state.history:
     else:
         total_compromiso_hoy = len(df_vapa)
 
-    st.markdown("### 📥 Ingreso Diario y Clientes Clave")
+    # --- CÁLCULO DE KPIs ---
+    if total_compromiso_hoy > 0:
+        pct_fallando = round((bultos_estacion_total / total_compromiso_hoy) * 100, 1)
+        pct_exito = round(100.0 - pct_fallando, 1)
+    else:
+        pct_exito, pct_fallando = 0, 0
+
+    # --- RENDERIZADO DE KPIs PRINCIPALES (NUEVO VISUAL) ---
+    st.markdown("### 📊 Indicadores de Rendimiento (Compromisos de Hoy)")
+    col_kpi1, col_kpi2 = st.columns(2)
+    with col_kpi1:
+        st.markdown(f"""
+            <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #00AA50; margin-bottom: 15px;'>
+                <span style='color:#A0A0A0; font-size:12px; text-transform:uppercase;'>Compromisos a Tiempo</span><br>
+                <span style='color:#FFFFFF; font-size:28px; font-weight:bold;'>{pct_exito}%</span>
+                <div style='background-color:#2F2F2F; border-radius:5px; margin-top:5px; height:8px; width:100%;'>
+                    <div style='background-color:#00AA50; border-radius:5px; height:8px; width:{pct_exito}%;'></div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+    with col_kpi2:
+        st.markdown(f"""
+            <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #E63946; margin-bottom: 15px;'>
+                <span style='color:#A0A0A0; font-size:12px; text-transform:uppercase;'>Fallando Compromiso (En Estación)</span><br>
+                <span style='color:#FFFFFF; font-size:28px; font-weight:bold;'>{pct_fallando}%</span>
+                <div style='background-color:#2F2F2F; border-radius:5px; margin-top:5px; height:8px; width:100%;'>
+                    <div style='background-color:#E63946; border-radius:5px; height:8px; width:{pct_fallando}%;'></div>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
     
-    total_ingreso = len(df_vapa)
+    st.divider()
     
+    st.markdown("### 📥 Volumen Diario y Clientes")
+
+    # --- CÁLCULO Y ORDENAMIENTO DE CLIENTES ---
     if not df_vapa.empty:
         filas_unidas = pd.Series("", index=df_vapa.index)
         for col in df_vapa.columns:
@@ -370,30 +410,41 @@ if st.session_state.history:
     else:
         tricot_count, socofar_count, fasa_count, miguel_count = 0, 0, 0, 0
 
+    clientes = [
+        {"nombre": "Tricot", "cantidad": tricot_count, "color": "#FF6600"},
+        {"nombre": "SOCOFAR", "cantidad": socofar_count, "color": "#4D148C"},
+        {"nombre": "FASA", "cantidad": fasa_count, "color": "#4D148C"},
+        {"nombre": "Miguel Torres", "cantidad": miguel_count, "color": "#4D148C"}
+    ]
+    clientes_ordenados = sorted(clientes, key=lambda x: x["cantidad"], reverse=True)
+
     c_chart, c_metrics = st.columns([2, 1])
     
     with c_metrics:
-        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#8D99AE;'><span class='metric-title' style='font-size:11px;'>Total Llegaron Hoy</span><span class='metric-value' style='font-size:20px;'>{total_ingreso}</span></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#FF6600;'><span class='metric-title' style='font-size:11px;'>Tricot</span><span class='metric-value' style='font-size:20px; color:#FF6600;'>{tricot_count}</span></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#4D148C;'><span class='metric-title' style='font-size:11px;'>SOCOFAR</span><span class='metric-value' style='font-size:20px; color:#4D148C;'>{socofar_count}</span></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#4D148C;'><span class='metric-title' style='font-size:11px;'>FASA</span><span class='metric-value' style='font-size:20px; color:#4D148C;'>{fasa_count}</span></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#4D148C;'><span class='metric-title' style='font-size:11px;'>Miguel Torres</span><span class='metric-value' style='font-size:20px; color:#4D148C;'>{miguel_count}</span></div>", unsafe_allow_html=True)
+        # Fijos Arriba
+        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#8D99AE;'><span class='metric-title' style='font-size:11px;'>1. Total Llegaron Hoy</span><span class='metric-value' style='font-size:20px;'>{total_ingreso}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#06D6A0;'><span class='metric-title' style='font-size:11px;'>2. En Ruta (VAN)</span><span class='metric-value' style='font-size:20px; color:#06D6A0;'>{m_en_ruta}</span></div>", unsafe_allow_html=True)
+        
+        # Dinámicos Abajo (Ordenados de Mayor a Menor)
+        for cli in clientes_ordenados:
+            st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:{cli['color']};'><span class='metric-title' style='font-size:11px;'>{cli['nombre']}</span><span class='metric-value' style='font-size:20px; color:{cli['color']};'>{cli['cantidad']}</span></div>", unsafe_allow_html=True)
 
     with c_chart:
-        df_ingreso = pd.DataFrame({
-            "Categoría": ["Total", "Tricot", "SOCOFAR", "FASA", "Miguel Torres"],
-            "Cantidad": [total_ingreso, tricot_count, socofar_count, fasa_count, miguel_count],
-            "Color": ["#8D99AE", "#FF6600", "#4D148C", "#4D148C", "#4D148C"]
-        })
+        cat_names = ["1. Llegaron Hoy", "2. En Ruta"] + [c["nombre"] for c in clientes_ordenados]
+        cat_counts = [total_ingreso, m_en_ruta] + [c["cantidad"] for c in clientes_ordenados]
+        cat_colors = ["#8D99AE", "#06D6A0"] + [c["color"] for c in clientes_ordenados]
+        
+        df_ingreso = pd.DataFrame({"Categoría": cat_names, "Cantidad": cat_counts, "Color": cat_colors})
+        
         fig_ingreso = px.bar(df_ingreso, x="Categoría", y="Cantidad", text="Cantidad", 
                              color="Categoría", color_discrete_sequence=df_ingreso["Color"].tolist(),
                              template="plotly_dark", title="Distribución de Ingreso Relevante")
-        fig_ingreso.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=40, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+        fig_ingreso.update_layout(showlegend=False, height=380, margin=dict(l=0, r=0, t=40, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_ingreso, use_container_width=True)
 
     st.divider()
 
-    # --- LÓGICA DE EXCEPCIONES Y EN RUTA ---
+    # --- LÓGICA DE EXCEPCIONES RESTANTES ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
@@ -405,13 +456,6 @@ if st.session_state.history:
     else:
         df_44 = pd.DataFrame()
         
-    if 'VAN All' in df_vapa.columns:
-        filtro_en_ruta = df_vapa['VAN All'].notna() & (df_vapa['VAN All'].astype(str).str.strip() != "")
-        df_en_ruta = df_vapa[filtro_en_ruta]
-    else:
-        df_en_ruta = pd.DataFrame()
-        
-    # --- FILTRO ACTUALIZADO "FALTA STAT 44 Y APLAZAR" (Solo lo que falla compromiso) ---
     has_stat = pd.Series(False, index=df_bodega.index)
     for stat_col in ['STAT 44 Date Time Latest', 'STAT 50 Latest', 'STAT 53 All', 'STAT 37 Latest', 'STAT 27 Latest']:
         if stat_col in df_bodega.columns:
@@ -422,10 +466,9 @@ if st.session_state.history:
         dex_col = df_bodega['DEX All'].astype(str).str.upper()
         has_dex = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07', regex=True, na=False)
         
-    # Extraer estrictamente lo que falla compromiso y no tiene escaneos de gestión
     df_falta_44 = df_bodega[~has_stat & ~has_dex]
     
-    m_50, m_53, m_44, m_en_ruta, count_falta_44, bultos_estacion_total = len(df_50), len(df_53), len(df_44), len(df_en_ruta), len(df_falta_44), len(df_bodega)
+    m_50, m_53, m_44, count_falta_44 = len(df_50), len(df_53), len(df_44), len(df_falta_44)
     
     cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
@@ -499,11 +542,6 @@ if st.session_state.history:
             with st.expander("👁️ Ver"): 
                 if bultos_estacion_total > 0: st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                 else: st.write("Vacío")
-
-        chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "En Ruta", "Falta 44 y Aplazar", "Bultos en Estación"], "Bultos": [m_50, m_53, m_44, m_en_ruta, count_falta_44, bultos_estacion_total], "Color": ["#FF6600", "#FF6600", "#FF6600", "#06D6A0", "#E63946", "#4D148C"]})
-        fig = px.bar(chart_data, x="Categoría", y="Bultos", text="Bultos", color="Categoría", color_discrete_sequence=chart_data["Color"].tolist(), template="plotly_dark")
-        fig.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=30, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
         st.markdown("### Motor de Búsqueda y Filtrado")
