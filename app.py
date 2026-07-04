@@ -120,12 +120,14 @@ st.divider()
 
 class VapaEngine:
     @staticmethod
-    @st.cache_data(show_spinner=False) # Agregado caché para mayor velocidad
+    @st.cache_data(show_spinner=False)
     def process_file_data(df):
         hoy = datetime.now()
         df['Fecha de Carga'] = hoy.strftime('%Y-%m-%d')
         
         df_vapa = df[df['Dest Loc Cd'].astype(str).str.strip().str.upper() == 'VAPA'].copy()
+        
+        #df_bodega: Físicamente en estación y con compromiso fallando/vencido
         df_bodega = df_vapa[
             (df_vapa['VAN All'].isna() | (df_vapa['VAN All'].astype(str).str.strip() == "")) & 
             (df_vapa['POD All'].isna() | (df_vapa['POD All'].astype(str).str.strip() == ""))
@@ -171,7 +173,7 @@ def clean_pdf_text(text):
 # ==============================================================================
 # 4. GENERADOR DE PDF EJECUTIVO AVANZADO
 # ==============================================================================
-def generar_pdf_avanzado(fecha_str, auditor, total, tricot, sin_asignar, en_ruta, count_sin_mov, df_criticos):
+def generar_pdf_avanzado(fecha_str, auditor, total, tricot, bultos_estacion, en_ruta, count_sin_mov, df_criticos, total_compromiso):
     pdf = FPDF()
     pdf.add_page()
     
@@ -197,32 +199,39 @@ def generar_pdf_avanzado(fecha_str, auditor, total, tricot, sin_asignar, en_ruta
     pdf.line(10, 50, 200, 50)
     pdf.ln(5)
     
+    # --- SECCIÓN 1: KPIs Y BARRAS DE PROGRESO (BASADO EN COMPROMISOS) ---
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(0, 0, 0)
-    pdf.cell(0, 10, txt="1. INDICADORES DE RENDIMIENTO (KPIs)", ln=True)
+    pdf.cell(0, 10, txt="1. INDICADORES DE RENDIMIENTO (SOBRE COMPROMISOS DE HOY)", ln=True)
     
-    if total > 0:
-        pct_ruta = round((en_ruta / total) * 100, 1)
-        pct_estacion = round((sin_asignar / total) * 100, 1)
+    # Nuevo cálculo de KPIs
+    if total_compromiso > 0:
+        pct_fallando = round((bultos_estacion / total_compromiso) * 100, 1)
+        pct_exito = round(100.0 - pct_fallando, 1)
     else:
-        pct_ruta, pct_estacion = 0, 0
+        pct_exito, pct_fallando = 0, 0
         
     pdf.set_font("Arial", '', 10)
-    pdf.cell(60, 8, txt=f"Eficiencia de Despacho ({pct_ruta}%):")
+    
+    # Barra KPI Éxito (En Ruta o Entregado)
+    pdf.cell(80, 8, txt=f"Compromisos a Tiempo ({pct_exito}%):")
     pdf.set_fill_color(220, 220, 220)
-    pdf.rect(75, pdf.get_y() + 2, 100, 4, 'F')
-    pdf.set_fill_color(0, 170, 80) 
-    pdf.rect(75, pdf.get_y() + 2, int(pct_ruta), 4, 'F')
+    pdf.rect(90, pdf.get_y() + 2, 100, 4, 'F')
+    pdf.set_fill_color(0, 170, 80) # Verde
+    pdf.rect(90, pdf.get_y() + 2, int(pct_exito), 4, 'F')
     pdf.ln(8)
     
-    pdf.cell(60, 8, txt=f"Carga en Estacion ({pct_estacion}%):")
+    # Barra KPI Fallando (En Estación)
+    pdf.cell(80, 8, txt=f"Fallando Compromiso (En Estacion) ({pct_fallando}%):")
     pdf.set_fill_color(220, 220, 220)
-    pdf.rect(75, pdf.get_y() + 2, 100, 4, 'F')
-    pdf.set_fill_color(77, 20, 140) 
-    pdf.rect(75, pdf.get_y() + 2, int(pct_estacion), 4, 'F')
+    pdf.rect(90, pdf.get_y() + 2, 100, 4, 'F')
+    pdf.set_fill_color(200, 0, 0) # Rojo para marcar el impacto negativo
+    pdf.rect(90, pdf.get_y() + 2, int(pct_fallando), 4, 'F')
     pdf.ln(12)
 
+    # --- SECCIÓN 2: RESUMEN VOLUMÉTRICO ---
     pdf.set_font("Arial", 'B', 12)
+    pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, txt="2. RESUMEN VOLUMETRICO DE BULTOS", ln=True)
     
     def add_row(label, value, fill_color, text_color):
@@ -242,9 +251,10 @@ def generar_pdf_avanzado(fecha_str, auditor, total, tricot, sin_asignar, en_ruta
     add_row("Total Procesados (Llegaron Hoy a la Estacion)", total, (255, 255, 255), (0, 0, 0))
     add_row("Total Ingreso Cliente TRICOT", tricot, (255, 245, 235), (255, 102, 0))
     add_row("Bultos en Ruta (Carga Asignada en VAN)", en_ruta, (230, 250, 230), (0, 128, 64))
-    add_row("Bultos Sin Asignar (En Estacion / Sin Ruta)", sin_asignar, (245, 235, 255), (77, 20, 140))
+    add_row("Bultos en la Estacion (Fallando Compromiso)", bultos_estacion, (245, 235, 255), (77, 20, 140))
     add_row("Sin Movimiento (Solo SIP, Sin Excepciones)", count_sin_mov, (255, 230, 230), (200, 0, 0))
     
+    # --- SECCIÓN 3: ANEXO DE ACCIÓN RÁPIDA ---
     def imprimir_cabecera_tabla_roja():
         pdf.set_fill_color(200, 0, 0)
         pdf.set_text_color(255, 255, 255)
@@ -309,7 +319,6 @@ st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
 if "history" not in st.session_state: 
     st.session_state.history = {}
 
-# Novedad: Formulario para evitar recargas automáticas que interrumpen la subida
 with st.sidebar.form("upload_form", clear_on_submit=False):
     uploaded_files = st.file_uploader("", type=["xlsx"], accept_multiple_files=True)
     btn_procesar = st.form_submit_button("⚙️ Procesar Archivos")
@@ -338,6 +347,14 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
+    # Determinar el Total de Compromisos para el cálculo preciso del KPI
+    if 'Commit Date' in df_vapa.columns:
+        fechas_entrega_vapa = pd.to_datetime(df_vapa['Commit Date'], errors='coerce').dt.date
+        filtro_compromiso_vapa = fechas_entrega_vapa.isna() | (fechas_entrega_vapa <= datetime.now().date())
+        total_compromiso_hoy = len(df_vapa[filtro_compromiso_vapa])
+    else:
+        total_compromiso_hoy = len(df_vapa)
+
     st.markdown("### 📥 Ingreso Diario y Clientes Clave")
     
     total_ingreso = len(df_vapa)
@@ -377,6 +394,7 @@ if st.session_state.history:
 
     st.divider()
 
+    # --- LÓGICA DE EXCEPCIONES Y EN RUTA ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
@@ -412,7 +430,7 @@ if st.session_state.history:
         
     df_sin_mov = df_bodega[is_sip & ~has_stat & ~has_dex]
     
-    m_50, m_53, m_44, m_en_ruta, count_sin_mov, sin_mov_total = len(df_50), len(df_53), len(df_44), len(df_en_ruta), len(df_sin_mov), len(df_bodega)
+    m_50, m_53, m_44, m_en_ruta, count_sin_mov, bultos_estacion_total = len(df_50), len(df_53), len(df_44), len(df_en_ruta), len(df_sin_mov), len(df_bodega)
     
     cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
@@ -437,10 +455,11 @@ if st.session_state.history:
                         auditor=auditor_name,
                         total=total_ingreso,
                         tricot=tricot_count,
-                        sin_asignar=sin_mov_total, 
+                        bultos_estacion=bultos_estacion_total, 
                         en_ruta=m_en_ruta,   
                         count_sin_mov=count_sin_mov,
-                        df_criticos=df_sin_mov
+                        df_criticos=df_sin_mov,
+                        total_compromiso=total_compromiso_hoy
                     )
                     st.download_button(
                         label="📄 Descargar Reporte PDF",
@@ -481,12 +500,12 @@ if st.session_state.history:
                 if count_sin_mov > 0: st.dataframe(df_sin_mov[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                 else: st.write("Vacío")
         with col6: 
-            st.markdown(f"<div class='metric-box' style='border-bottom-color:#4D148C;'><span class='metric-title'>En Estación</span><span class='metric-value' style='color:#4D148C;'>{sin_mov_total}</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-box' style='border-bottom-color:#4D148C;'><span class='metric-title'>Bultos en Estación</span><span class='metric-value' style='color:#4D148C;'>{bultos_estacion_total}</span></div>", unsafe_allow_html=True)
             with st.expander("👁️ Ver"): 
-                if sin_mov_total > 0: st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                if bultos_estacion_total > 0: st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                 else: st.write("Vacío")
 
-        chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "En Ruta", "Sin Movimiento", "En Estación"], "Bultos": [m_50, m_53, m_44, m_en_ruta, count_sin_mov, sin_mov_total], "Color": ["#FF6600", "#FF6600", "#FF6600", "#06D6A0", "#E63946", "#4D148C"]})
+        chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "En Ruta", "Sin Movimiento", "Bultos en Estación"], "Bultos": [m_50, m_53, m_44, m_en_ruta, count_sin_mov, bultos_estacion_total], "Color": ["#FF6600", "#FF6600", "#FF6600", "#06D6A0", "#E63946", "#4D148C"]})
         fig = px.bar(chart_data, x="Categoría", y="Bultos", text="Bultos", color="Categoría", color_discrete_sequence=chart_data["Color"].tolist(), template="plotly_dark")
         fig.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=30, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
