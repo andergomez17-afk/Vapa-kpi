@@ -252,8 +252,10 @@ if st.session_state.history:
     total_ingreso = len(df_vapa)
     
     if not df_vapa.empty:
-        # Búsqueda global a prueba de errores
-        filas_unidas = df_vapa.astype(str).apply(lambda row: ' '.join(row.values), axis=1).str.upper()
+        # SOLUCIÓN DEFINITIVA: Concatenación segura sumando columnas
+        filas_unidas = pd.Series("", index=df_vapa.index)
+        for col in df_vapa.columns:
+            filas_unidas += df_vapa[col].fillna('').astype(str).str.upper() + " "
         
         tricot_count = filas_unidas.str.contains('TRICOT', na=False).sum()
         socofar_count = filas_unidas.str.contains('CRUZ VERDE|MAICAO|INTERCARRY|SOCOFAR', na=False).sum()
