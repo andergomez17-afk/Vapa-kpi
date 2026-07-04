@@ -161,58 +161,133 @@ def color_fedex_cliente(row):
         
     return [color] * len(row)
 
-# Generador de PDF Corporativo
-def generar_pdf_reporte(fecha_str, total, tricot, sin_asignar, en_ruta, sin_aplazar_44):
+# ==============================================================================
+# 4. GENERADOR DE PDF EJECUTIVO AVANZADO
+# ==============================================================================
+def generar_pdf_avanzado(fecha_str, auditor, total, tricot, sin_asignar, en_ruta, sin_aplazar_44, df_criticos):
     pdf = FPDF()
     pdf.add_page()
     
-    # Encabezado con fondo morado
-    pdf.set_fill_color(77, 20, 140)
+    # --- ENCABEZADO CORPORATIVO ---
+    pdf.set_fill_color(77, 20, 140) # Morado FedEx
     pdf.rect(0, 0, 210, 35, 'F')
     
     pdf.set_y(8)
     pdf.set_font("Arial", 'B', 20)
     pdf.set_text_color(255, 255, 255)
-    pdf.cell(0, 10, txt="REPORTE OPERATIVO - FEDEX VAPA", ln=True, align='C')
+    pdf.cell(0, 10, txt="REPORTE EJECUTIVO DE OPERACIONES", ln=True, align='C')
     pdf.set_font("Arial", 'I', 12)
-    pdf.set_text_color(255, 102, 0)
-    pdf.cell(0, 10, txt="Control de Inventario y Despacho", ln=True, align='C')
+    pdf.set_text_color(255, 102, 0) # Naranja FedEx
+    pdf.cell(0, 10, txt="Terminal VAPA - Auditoria de Despacho", ln=True, align='C')
     
-    pdf.set_y(45)
+    pdf.set_y(40)
     
-    # Fecha de emisión
-    pdf.set_font("Arial", 'B', 11)
+    # --- DATOS DEL REPORTE E IDENTIFICACIÓN ---
+    pdf.set_font("Arial", 'B', 10)
     pdf.set_text_color(50, 50, 50)
-    pdf.cell(0, 10, txt=f"FECHA DE EMISION: {fecha_str}", ln=True)
-    pdf.line(10, 55, 200, 55)
+    pdf.cell(100, 8, txt=f"FECHA DE EMISION: {fecha_str}")
+    nombre_auditor = auditor if auditor.strip() != "" else "No especificado"
+    pdf.cell(90, 8, txt=f"SUPERVISOR/AUDITOR: {nombre_auditor}", align='R', ln=True)
+    pdf.line(10, 50, 200, 50)
     pdf.ln(5)
     
-    # Función para crear filas de tabla con colores
+    # --- SECCIÓN 1: KPIs Y BARRAS DE PROGRESO ---
+    pdf.set_font("Arial", 'B', 12)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(0, 10, txt="1. INDICADORES DE RENDIMIENTO (KPIs)", ln=True)
+    
+    if total > 0:
+        pct_ruta = round((en_ruta / total) * 100, 1)
+        pct_estacion = round((sin_asignar / total) * 100, 1)
+    else:
+        pct_ruta, pct_estacion = 0, 0
+        
+    pdf.set_font("Arial", '', 10)
+    # Barra KPI En Ruta
+    pdf.cell(60, 8, txt=f"Eficiencia de Despacho ({pct_ruta}%):")
+    pdf.set_fill_color(220, 220, 220)
+    pdf.rect(75, pdf.get_y() + 2, 100, 4, 'F') # Fondo gris
+    pdf.set_fill_color(0, 170, 80) # Verde
+    pdf.rect(75, pdf.get_y() + 2, int(pct_ruta), 4, 'F') # Relleno dinámico
+    pdf.ln(8)
+    
+    # Barra KPI En Estación
+    pdf.cell(60, 8, txt=f"Carga en Estacion ({pct_estacion}%):")
+    pdf.set_fill_color(220, 220, 220)
+    pdf.rect(75, pdf.get_y() + 2, 100, 4, 'F')
+    pdf.set_fill_color(77, 20, 140) # Morado
+    pdf.rect(75, pdf.get_y() + 2, int(pct_estacion), 4, 'F')
+    pdf.ln(12)
+
+    # --- SECCIÓN 2: RESUMEN VOLUMÉTRICO ---
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 10, txt="2. RESUMEN VOLUMETRICO DE BULTOS", ln=True)
+    
     def add_row(label, value, fill_color, text_color):
         pdf.set_fill_color(*fill_color)
         pdf.set_text_color(*text_color)
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(145, 10, txt=f"  {label}", border=1, fill=True)
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(145, 12, txt=f"  {label}", border=1, fill=True)
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(45, 12, txt=str(value), border=1, fill=True, align='C', ln=True)
+        pdf.cell(45, 10, txt=str(value), border=1, fill=True, align='C', ln=True)
 
     pdf.set_fill_color(220, 220, 220)
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(145, 10, txt="  INDICADOR LOGISTICO", border=1, fill=True)
-    pdf.cell(45, 10, txt="VOLUMEN", border=1, fill=True, align='C', ln=True)
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(145, 8, txt="  ESTADO LOGISTICO", border=1, fill=True)
+    pdf.cell(45, 8, txt="CANTIDAD", border=1, fill=True, align='C', ln=True)
 
-    # Filas de la tabla
-    add_row("1. Total Procesados (Llegaron Hoy a la Estacion)", total, (255, 255, 255), (0, 0, 0))
-    add_row("2. Total Ingreso Cliente TRICOT", tricot, (255, 245, 235), (255, 102, 0))
-    add_row("3. Bultos en Ruta (Carga Asignada en VAN)", en_ruta, (230, 250, 230), (0, 128, 64))
-    add_row("4. Bultos Sin Asignar (En Estacion / Sin Ruta)", sin_asignar, (245, 235, 255), (77, 20, 140))
-    add_row("5. Sin aplazar ni STAT 44", sin_aplazar_44, (255, 230, 230), (200, 0, 0))
+    add_row("Total Procesados (Llegaron Hoy a la Estacion)", total, (255, 255, 255), (0, 0, 0))
+    add_row("Total Ingreso Cliente TRICOT", tricot, (255, 245, 235), (255, 102, 0))
+    add_row("Bultos en Ruta (Carga Asignada en VAN)", en_ruta, (230, 250, 230), (0, 128, 64))
+    add_row("Bultos Sin Asignar (En Estacion / Sin Ruta)", sin_asignar, (245, 235, 255), (77, 20, 140))
+    add_row("Sin aplazar ni STAT 44", sin_aplazar_44, (255, 230, 230), (200, 0, 0))
     
-    pdf.ln(25)
-    pdf.set_font("Arial", 'I', 9)
+    # --- SECCIÓN 3: ANEXO DE ACCIÓN RÁPIDA (Solo si hay críticos) ---
+    if not df_criticos.empty:
+        pdf.add_page() # Salto a página 2
+        pdf.set_font("Arial", 'B', 14)
+        pdf.set_text_color(200, 0, 0) # Rojo alerta
+        pdf.cell(0, 10, txt="ANEXO: BULTOS CRITICOS (SIN APLAZAR NI STAT 44)", ln=True)
+        
+        pdf.set_font("Arial", 'I', 10)
+        pdf.set_text_color(50, 50, 50)
+        pdf.cell(0, 6, txt="La siguiente lista requiere accion y rastreo inmediato en piso:", ln=True)
+        pdf.ln(4)
+        
+        # Cabecera tabla anexo
+        pdf.set_fill_color(200, 0, 0)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(45, 8, txt="Tracking Number", border=1, fill=True)
+        pdf.cell(100, 8, txt="Cliente / Empresa", border=1, fill=True)
+        pdf.cell(45, 8, txt="Status DREUI", border=1, fill=True, ln=True)
+        
+        # Filas tabla anexo (Limitado a los primeros 45 para no desbordar el diseño)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Arial", '', 9)
+        
+        for _, row in df_criticos.head(45).iterrows():
+            trk = str(row.get('Tracking Number', 'N/A'))
+            
+            # Extraer cliente priorizando Company, si no Name. Cortamos a 50 chars max.
+            shp = str(row.get('Shipper Company', str(row.get('Shipper Name', 'N/A'))))[:50] 
+            
+            stat = str(row.get('Status', str(row.get('status', 'N/A'))))[:20]
+            
+            pdf.cell(45, 7, txt=trk, border=1)
+            pdf.cell(100, 7, txt=shp, border=1)
+            pdf.cell(45, 7, txt=stat, border=1, ln=True)
+            
+        if len(df_criticos) > 45:
+            pdf.set_font("Arial", 'I', 10)
+            pdf.cell(0, 8, txt=f"... y {len(df_criticos) - 45} bultos mas no mostrados aqui.", border=0, ln=True)
+
+    # --- PIE DE PÁGINA ---
+    pdf.set_y(-15)
+    pdf.set_font("Arial", 'I', 8)
     pdf.set_text_color(128, 128, 128)
-    pdf.cell(0, 10, txt="Documento generado automaticamente por el Monitor de Almacen - FedEx VAPA.", ln=True, align='C')
+    pdf.cell(0, 10, txt=f"Documento confidencial generado el {fecha_str} | Sistema DREUI VAPA", align='C')
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         pdf.output(tmp.name)
@@ -220,7 +295,7 @@ def generar_pdf_reporte(fecha_str, total, tricot, sin_asignar, en_ruta, sin_apla
             return f.read()
 
 # ==============================================================================
-# 4. BARRA LATERAL
+# 5. BARRA LATERAL
 # ==============================================================================
 st.sidebar.header("📥 Ingreso de Datos")
 st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
@@ -238,7 +313,7 @@ if uploaded_files:
     st.sidebar.success("✅ Archivos procesados.")
 
 # ==============================================================================
-# 5. DASHBOARD INTERACTIVO
+# 6. DASHBOARD INTERACTIVO
 # ==============================================================================
 if st.session_state.history:
     available_days = sorted(list(st.session_state.history.keys()))
@@ -252,7 +327,6 @@ if st.session_state.history:
     total_ingreso = len(df_vapa)
     
     if not df_vapa.empty:
-        # SOLUCIÓN DEFINITIVA: Concatenación segura sumando columnas
         filas_unidas = pd.Series("", index=df_vapa.index)
         for col in df_vapa.columns:
             filas_unidas += df_vapa[col].fillna('').astype(str).str.upper() + " "
@@ -299,14 +373,14 @@ if st.session_state.history:
     else:
         df_44 = pd.DataFrame()
         
-    # En Ruta (Todo lo que tenga un registro en VAN All)
+    # En Ruta
     if 'VAN All' in df_vapa.columns:
         filtro_en_ruta = df_vapa['VAN All'].notna() & (df_vapa['VAN All'].astype(str).str.strip() != "")
         df_en_ruta = df_vapa[filtro_en_ruta]
     else:
         df_en_ruta = pd.DataFrame()
         
-    # Sin aplazar ni STAT 44 (Sin movimiento absoluto)
+    # Sin aplazar ni STAT 44
     if 'STAT 44 Date Time Latest' in df_bodega.columns:
         bodega_has_44 = df_bodega['STAT 44 Date Time Latest'].notna()
     else:
@@ -323,27 +397,39 @@ if st.session_state.history:
     with tab1:
         st.markdown("### Resumen de Excepciones e Inventario")
         
-        # --- BOTÓN DE DESCARGA PDF ---
+        # --- UI PARA GENERAR Y DESCARGAR PDF AVANZADO ---
         if HAS_FPDF:
-            fecha_actual_str = datetime.now().strftime('%d-%m-%Y')
-            pdf_bytes = generar_pdf_reporte(
-                fecha_str=datetime.now().strftime('%d-%m-%Y %H:%M'),
-                total=total_ingreso,
-                tricot=tricot_count,
-                sin_asignar=sin_mov, # Lo que está en estación
-                en_ruta=m_en_ruta,   
-                sin_aplazar_44=count_sin_aplazar_44
-            )
-            st.download_button(
-                label="📄 Descargar Reporte en PDF",
-                data=pdf_bytes,
-                file_name=f"Reporte_Diario_{fecha_actual_str}.pdf",
-                mime="application/pdf"
-            )
+            with st.container():
+                st.markdown("<div style='background-color: #1E1E1E; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #FF6600;'>", unsafe_allow_html=True)
+                col_pdf1, col_pdf2 = st.columns([2, 1])
+                with col_pdf1:
+                    # Input para la firma. Placeholder con tu nombre como ejemplo visual rápido
+                    auditor_name = st.text_input("👤 Nombre del Supervisor/Auditor para el reporte:", placeholder="Ej. Anderson Gómez")
+                with col_pdf2:
+                    st.write("") 
+                    st.write("") 
+                    fecha_actual_str = datetime.now().strftime('%d-%m-%Y')
+                    pdf_bytes = generar_pdf_avanzado(
+                        fecha_str=datetime.now().strftime('%d-%m-%Y %H:%M'),
+                        auditor=auditor_name,
+                        total=total_ingreso,
+                        tricot=tricot_count,
+                        sin_asignar=sin_mov, 
+                        en_ruta=m_en_ruta,   
+                        sin_aplazar_44=count_sin_aplazar_44,
+                        df_criticos=df_sin_aplazar_44
+                    )
+                    st.download_button(
+                        label="📄 Descargar Reporte PDF",
+                        data=pdf_bytes,
+                        file_name=f"Reporte_Diario_{fecha_actual_str}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                st.markdown("</div>", unsafe_allow_html=True)
         else:
             st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
-        # Dividido en 6 columnas para alojar todas las métricas operativas
         col1, col2, col3, col4, col5, col6 = st.columns(6)
         
         with col1: 
