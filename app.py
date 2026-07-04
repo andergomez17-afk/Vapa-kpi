@@ -37,7 +37,7 @@ st.markdown("""
     .metric-box:hover {
         transform: translateY(-5px); border-bottom: 4px solid #FF6600;
     }
-    .metric-title { font-size: 14px; color: #A0A0A0; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; display: block; }
+    .metric-title { font-size: 13px; color: #A0A0A0; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; display: block; }
     .metric-value { font-size: 32px; font-weight: 900; color: #FFFFFF; display: block; }
     
     [data-testid="stForm"] {
@@ -59,7 +59,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CAPA DE SEGURIDAD (LOGIN INTEGRADO EN CAJA)
+# 2. CAPA DE SEGURIDAD (LOGIN INTEGRADO EN CAJA - SIN IMÁGENES ROTAS)
 # ==============================================================================
 def check_password():
     if "password_correct" not in st.session_state:
@@ -67,14 +67,10 @@ def check_password():
 
     if not st.session_state["password_correct"]:
         with st.form("login_form"):
-            # Usamos st.columns y st.image en lugar de HTML para evitar el ícono roto
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
-                st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/FedEx_Express_logo.svg/512px-FedEx_Express_logo.svg.png", use_container_width=True)
-            
+            # Usamos solo texto estilizado para evitar el error de red de la imagen
             st.markdown("""
-                <div style='text-align: center; padding-bottom: 10px;'>
-                    <h2 style='margin-top: 0px; margin-bottom: 5px;'>
+                <div style='text-align: center; padding-bottom: 15px;'>
+                    <h2 style='margin-top: 10px; margin-bottom: 5px; font-size: 42px;'>
                         <span style='color: #4D148C; font-weight: 900;'>FedEx</span> 
                         <span style='color: #FF6600; font-weight: 900;'>VAPA</span>
                     </h2>
@@ -102,11 +98,9 @@ if not check_password():
 # ==============================================================================
 # 3. CABECERA PRINCIPAL Y MOTOR
 # ==============================================================================
-col_logo, col_titulo, col_salir = st.columns([1, 6, 1])
-with col_logo:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/FedEx_Express_logo.svg/512px-FedEx_Express_logo.svg.png", width=100)
+col_titulo, col_salir = st.columns([7, 1])
 with col_titulo:
-    st.markdown("<h1 style='margin-bottom: 0px;'>Monitoreo de Almacén</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='margin-bottom: 0px;'>📦 Monitoreo de Almacén</h1>", unsafe_allow_html=True)
     st.caption("Valparaíso Operations | Monitor de Excepciones y Base de Datos")
 with col_salir:
     st.write("") 
@@ -146,9 +140,13 @@ class VapaEngine:
             return None, None
 
 def color_fedex_cliente(row):
-    fila_str = ' '.join(row.astype(str)).upper()
+    # Método a prueba de balas para concatenar la fila sin causar TypeError
+    fila_str = ""
+    for val in row.values:
+        if pd.notna(val):
+            fila_str += str(val).upper() + " "
+            
     color = ''
-    
     if 'TRICOT' in fila_str: 
         color = 'background-color: #FF6600; color: white;'
     elif any(c in fila_str for c in ['CRUZ VERDE', 'MAICAO', 'INTERCARRY', 'SOCOFAR', 'AHUMADA', 'FASA', 'MIGUEL TORRES']): 
@@ -160,7 +158,6 @@ def color_fedex_cliente(row):
 # 4. BARRA LATERAL
 # ==============================================================================
 st.sidebar.header("📥 Ingreso de Datos")
-st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/FedEx_Express_logo.svg/512px-FedEx_Express_logo.svg.png", width=140)
 st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
 uploaded_files = st.sidebar.file_uploader("", type=["xlsx"], accept_multiple_files=True)
 
@@ -190,8 +187,10 @@ if st.session_state.history:
     total_ingreso = len(df_vapa)
     
     if not df_vapa.empty:
-        # Solución al TypeError: usar apply() con lambda en lugar de agg()
-        filas_unidas = df_vapa.astype(str).apply(lambda row: ' '.join(row.values), axis=1).str.upper()
+        # Solución al TypeError: Bucle seguro columna por columna
+        filas_unidas = pd.Series("", index=df_vapa.index)
+        for col in df_vapa.columns:
+            filas_unidas += df_vapa[col].fillna('').astype(str).str.upper() + " "
         
         tricot_count = filas_unidas.str.contains('TRICOT', na=False).sum()
         socofar_count = filas_unidas.str.contains('CRUZ VERDE|MAICAO|INTERCARRY|SOCOFAR', na=False).sum()
@@ -223,6 +222,9 @@ if st.session_state.history:
 
     st.divider()
 
+    # --- LÓGICA DE FILTROS DE EXCEPCIONES ---
+    fecha_hoy = datetime.now().date()
+    
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
@@ -233,8 +235,22 @@ if st.session_state.history:
         df_44 = df_vapa[filtro_44]
     else:
         df_44 = pd.DataFrame()
+        
+    # NUEVO: Lógica Falta 44 y Aplazar
+    df_falta_44 = pd.DataFrame()
+    if 'Commit Date' in df_vapa.columns:
+        fechas_commit = pd.to_datetime(df_vapa['Commit Date'], errors='coerce').dt.date
+        es_commit_hoy = fechas_commit == fecha_hoy
+        
+        if 'STAT 44 Date Time Latest' in df_vapa.columns:
+            fechas_44 = pd.to_datetime(df_vapa['STAT 44 Date Time Latest'], errors='coerce').dt.date
+            no_tiene_44_hoy = fechas_44.isna() | (fechas_44 != fecha_hoy)
+        else:
+            no_tiene_44_hoy = pd.Series(True, index=df_vapa.index)
+            
+        df_falta_44 = df_vapa[es_commit_hoy & no_tiene_44_hoy]
     
-    m_50, m_53, m_44, sin_mov = len(df_50), len(df_53), len(df_44), len(df_bodega)
+    m_50, m_53, m_44, m_falta44, sin_mov = len(df_50), len(df_53), len(df_44), len(df_falta_44), len(df_bodega)
     cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
     
@@ -243,30 +259,35 @@ if st.session_state.history:
     with tab1:
         st.markdown("### Resumen de Excepciones e Inventario")
         
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1: 
             st.markdown(f"<div class='metric-box'><span class='metric-title'>STAT 50</span><span class='metric-value' style='color:#FF6600;'>{m_50}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver Bultos"): 
+            with st.expander("👁️ Ver"): 
                 if m_50 > 0: st.dataframe(df_50[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Sin registros.")
+                else: st.write("Vacío")
         with col2: 
             st.markdown(f"<div class='metric-box'><span class='metric-title'>STAT 53</span><span class='metric-value' style='color:#FF6600;'>{m_53}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver Bultos"): 
+            with st.expander("👁️ Ver"): 
                 if m_53 > 0: st.dataframe(df_53[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Sin registros.")
+                else: st.write("Vacío")
         with col3: 
             st.markdown(f"<div class='metric-box'><span class='metric-title'>Solo STAT 44</span><span class='metric-value' style='color:#FF6600;'>{m_44}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver Bultos"): 
+            with st.expander("👁️ Ver"): 
                 if m_44 > 0: st.dataframe(df_44[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Sin registros.")
+                else: st.write("Vacío")
         with col4: 
+            st.markdown(f"<div class='metric-box' style='border-bottom-color:#E63946;'><span class='metric-title'>Falta 44 y Aplazar</span><span class='metric-value' style='color:#E63946;'>{m_falta44}</span></div>", unsafe_allow_html=True)
+            with st.expander("👁️ Ver"): 
+                if m_falta44 > 0: st.dataframe(df_falta_44[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                else: st.write("Vacío")
+        with col5: 
             st.markdown(f"<div class='metric-box' style='border-bottom-color:#4D148C;'><span class='metric-title'>En Estación</span><span class='metric-value' style='color:#4D148C;'>{sin_mov}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver Bultos"): 
+            with st.expander("👁️ Ver"): 
                 if sin_mov > 0: st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Sin registros.")
+                else: st.write("Vacío")
 
-        chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "En Estación"], "Bultos": [m_50, m_53, m_44, sin_mov], "Color": ["#FF6600", "#FF6600", "#FF6600", "#4D148C"]})
+        chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "Falta 44 (Aplazar)", "En Estación"], "Bultos": [m_50, m_53, m_44, m_falta44, sin_mov], "Color": ["#FF6600", "#FF6600", "#FF6600", "#E63946", "#4D148C"]})
         fig = px.bar(chart_data, x="Categoría", y="Bultos", text="Bultos", color="Categoría", color_discrete_sequence=chart_data["Color"].tolist(), template="plotly_dark")
         fig.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=30, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
