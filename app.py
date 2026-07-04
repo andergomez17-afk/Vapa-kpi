@@ -142,12 +142,15 @@ class VapaEngine:
             return None, None
 
 def color_fedex_cliente(row):
-    cliente = str(row.get('Shipper Company', '')).upper()
+    # Unifica toda la fila en un solo texto para buscar en cualquier columna
+    fila_str = ' '.join(row.astype(str)).upper()
     color = ''
-    if 'TRICOT' in cliente: 
+    
+    if 'TRICOT' in fila_str: 
         color = 'background-color: #FF6600; color: white;'
-    elif any(c in cliente for c in ['CRUZ VERDE', 'MAICAO', 'INTERCARRY', 'SOCOFAR', 'AHUMADA', 'FASA', 'MIGUEL TORRES']): 
+    elif any(c in fila_str for c in ['CRUZ VERDE', 'MAICAO', 'INTERCARRY', 'SOCOFAR', 'AHUMADA', 'FASA', 'MIGUEL TORRES']): 
         color = 'background-color: #4D148C; color: white;'
+        
     return [color] * len(row)
 
 # ==============================================================================
@@ -179,16 +182,19 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
-    # --- NUEVA SECCIÓN SUPERIOR: DATOS DE INGRESO DIARIO ---
+    # --- NUEVA SECCIÓN SUPERIOR: DATOS DE INGRESO DIARIO (Búsqueda Global en toda la fila) ---
     st.markdown("### 📥 Ingreso Diario y Clientes Clave")
     
     total_ingreso = len(df_vapa)
-    if 'Shipper Company' in df_vapa.columns:
-        shipper_col = df_vapa['Shipper Company'].astype(str).str.upper()
-        tricot_count = shipper_col.str.contains('TRICOT', na=False).sum()
-        socofar_count = shipper_col.str.contains('CRUZ VERDE|MAICAO|INTERCARRY|SOCOFAR', na=False).sum()
-        fasa_count = shipper_col.str.contains('AHUMADA|FASA', na=False).sum()
-        miguel_count = shipper_col.str.contains('MIGUEL TORRES', na=False).sum()
+    
+    if not df_vapa.empty:
+        # Crea un solo bloque de texto por fila para evitar contar el mismo bulto doble
+        filas_unidas = df_vapa.astype(str).agg(' '.join, axis=1).str.upper()
+        
+        tricot_count = filas_unidas.str.contains('TRICOT', na=False).sum()
+        socofar_count = filas_unidas.str.contains('CRUZ VERDE|MAICAO|INTERCARRY|SOCOFAR', na=False).sum()
+        fasa_count = filas_unidas.str.contains('AHUMADA|FASA', na=False).sum()
+        miguel_count = filas_unidas.str.contains('MIGUEL TORRES', na=False).sum()
     else:
         tricot_count, socofar_count, fasa_count, miguel_count = 0, 0, 0, 0
 
@@ -215,7 +221,7 @@ if st.session_state.history:
 
     st.divider()
 
-    # --- LÓGICA DE FILTROS ACTUALIZADA (Sin DEX 17) ---
+    # --- LÓGICA DE FILTROS DE EXCEPCIONES ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
@@ -228,7 +234,7 @@ if st.session_state.history:
         df_44 = pd.DataFrame()
     
     m_50, m_53, m_44, sin_mov = len(df_50), len(df_53), len(df_44), len(df_bodega)
-    cols_to_check = ['Tracking Number', 'Shipper Company', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
+    cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
     
     tab1, tab2, tab3 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo"])
@@ -264,7 +270,6 @@ if st.session_state.history:
         fig.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=30, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
 
-    # --- PESTAÑA 2: BASE DE DATOS ---
     with tab2:
         st.markdown("### Motor de Búsqueda y Filtrado")
         c_search, c_filter = st.columns([3, 1])
@@ -282,7 +287,6 @@ if st.session_state.history:
 
         st.dataframe(display_df.style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True, height=500)
 
-    # --- PESTAÑA 3: CONTROL DE ENVEJECIMIENTO ---
     with tab3:
         st.markdown("### Control de Envejecimiento (≥ 3 días)")
         tracking_history = {}
