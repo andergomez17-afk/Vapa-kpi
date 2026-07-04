@@ -120,29 +120,33 @@ st.divider()
 
 class VapaEngine:
     @staticmethod
+    @st.cache_data(show_spinner=False) # Agregado caché para mayor velocidad
+    def process_file_data(df):
+        hoy = datetime.now()
+        df['Fecha de Carga'] = hoy.strftime('%Y-%m-%d')
+        
+        df_vapa = df[df['Dest Loc Cd'].astype(str).str.strip().str.upper() == 'VAPA'].copy()
+        df_bodega = df_vapa[
+            (df_vapa['VAN All'].isna() | (df_vapa['VAN All'].astype(str).str.strip() == "")) & 
+            (df_vapa['POD All'].isna() | (df_vapa['POD All'].astype(str).str.strip() == ""))
+        ].copy()
+
+        if 'Commit Date' in df_bodega.columns:
+            fechas_entrega = pd.to_datetime(df_bodega['Commit Date'], errors='coerce').dt.date
+            fecha_actual = hoy.date()
+            filtro_fecha = fechas_entrega.isna() | (fechas_entrega <= fecha_actual)
+            df_bodega = df_bodega[filtro_fecha]
+        
+        return df_vapa, df_bodega
+
+    @staticmethod
     def process_file(file):
         try:
             xls = pd.ExcelFile(file)
             sheet_name = 'BD' if 'BD' in xls.sheet_names else xls.sheet_names[0]
             df = pd.read_excel(xls, sheet_name=sheet_name)
             df.columns = [str(c).strip() for c in df.columns]
-            
-            hoy = datetime.now()
-            df['Fecha de Carga'] = hoy.strftime('%Y-%m-%d')
-            
-            df_vapa = df[df['Dest Loc Cd'].astype(str).str.strip().str.upper() == 'VAPA'].copy()
-            df_bodega = df_vapa[
-                (df_vapa['VAN All'].isna() | (df_vapa['VAN All'].astype(str).str.strip() == "")) & 
-                (df_vapa['POD All'].isna() | (df_vapa['POD All'].astype(str).str.strip() == ""))
-            ].copy()
-
-            if 'Commit Date' in df_bodega.columns:
-                fechas_entrega = pd.to_datetime(df_bodega['Commit Date'], errors='coerce').dt.date
-                fecha_actual = hoy.date()
-                filtro_fecha = fechas_entrega.isna() | (fechas_entrega <= fecha_actual)
-                df_bodega = df_bodega[filtro_fecha]
-            
-            return df_vapa, df_bodega
+            return VapaEngine.process_file_data(df)
         except Exception as e:
             st.error(f"Error crítico al procesar el archivo: {e}")
             return None, None
@@ -161,15 +165,18 @@ def color_fedex_cliente(row):
         
     return [color] * len(row)
 
+def clean_pdf_text(text):
+    return str(text).encode('latin-1', 'replace').decode('latin-1')
+
 # ==============================================================================
 # 4. GENERADOR DE PDF EJECUTIVO AVANZADO
 # ==============================================================================
-def generar_pdf_avanzado(fecha_str, auditor, total, tricot, sin_asignar, en_ruta, sin_aplazar_44, df_criticos):
+def generar_pdf_avanzado(fecha_str, auditor, total, tricot, sin_asignar, en_ruta, count_sin_mov, df_criticos):
     pdf = FPDF()
     pdf.add_page()
     
     # --- ENCABEZADO CORPORATIVO ---
-    pdf.set_fill_color(77, 20, 140) # Morado FedEx
+    pdf.set_fill_color(77, 20, 140) 
     pdf.rect(0, 0, 210, 35, 'F')
     
     pdf.set_y(8)
@@ -177,21 +184,19 @@ def generar_pdf_avanzado(fecha_str, auditor, total, tricot, sin_asignar, en_ruta
     pdf.set_text_color(255, 255, 255)
     pdf.cell(0, 10, txt="REPORTE EJECUTIVO DE OPERACIONES", ln=True, align='C')
     pdf.set_font("Arial", 'I', 12)
-    pdf.set_text_color(255, 102, 0) # Naranja FedEx
+    pdf.set_text_color(255, 102, 0) 
     pdf.cell(0, 10, txt="Terminal VAPA - Auditoria de Despacho", ln=True, align='C')
     
     pdf.set_y(40)
     
-    # --- DATOS DEL REPORTE E IDENTIFICACIÓN ---
     pdf.set_font("Arial", 'B', 10)
     pdf.set_text_color(50, 50, 50)
     pdf.cell(100, 8, txt=f"FECHA DE EMISION: {fecha_str}")
     nombre_auditor = auditor if auditor.strip() != "" else "No especificado"
-    pdf.cell(90, 8, txt=f"SUPERVISOR/AUDITOR: {nombre_auditor}", align='R', ln=True)
+    pdf.cell(90, 8, txt=clean_pdf_text(f"SUPERVISOR/AUDITOR: {nombre_auditor}"), align='R', ln=True)
     pdf.line(10, 50, 200, 50)
     pdf.ln(5)
     
-    # --- SECCIÓN 1: KPIs Y BARRAS DE PROGRESO ---
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, txt="1. INDICADORES DE RENDIMIENTO (KPIs)", ln=True)
@@ -203,23 +208,20 @@ def generar_pdf_avanzado(fecha_str, auditor, total, tricot, sin_asignar, en_ruta
         pct_ruta, pct_estacion = 0, 0
         
     pdf.set_font("Arial", '', 10)
-    # Barra KPI En Ruta
     pdf.cell(60, 8, txt=f"Eficiencia de Despacho ({pct_ruta}%):")
     pdf.set_fill_color(220, 220, 220)
-    pdf.rect(75, pdf.get_y() + 2, 100, 4, 'F') # Fondo gris
-    pdf.set_fill_color(0, 170, 80) # Verde
-    pdf.rect(75, pdf.get_y() + 2, int(pct_ruta), 4, 'F') # Relleno dinámico
+    pdf.rect(75, pdf.get_y() + 2, 100, 4, 'F')
+    pdf.set_fill_color(0, 170, 80) 
+    pdf.rect(75, pdf.get_y() + 2, int(pct_ruta), 4, 'F')
     pdf.ln(8)
     
-    # Barra KPI En Estación
     pdf.cell(60, 8, txt=f"Carga en Estacion ({pct_estacion}%):")
     pdf.set_fill_color(220, 220, 220)
     pdf.rect(75, pdf.get_y() + 2, 100, 4, 'F')
-    pdf.set_fill_color(77, 20, 140) # Morado
+    pdf.set_fill_color(77, 20, 140) 
     pdf.rect(75, pdf.get_y() + 2, int(pct_estacion), 4, 'F')
     pdf.ln(12)
 
-    # --- SECCIÓN 2: RESUMEN VOLUMÉTRICO ---
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(0, 10, txt="2. RESUMEN VOLUMETRICO DE BULTOS", ln=True)
     
@@ -241,49 +243,53 @@ def generar_pdf_avanzado(fecha_str, auditor, total, tricot, sin_asignar, en_ruta
     add_row("Total Ingreso Cliente TRICOT", tricot, (255, 245, 235), (255, 102, 0))
     add_row("Bultos en Ruta (Carga Asignada en VAN)", en_ruta, (230, 250, 230), (0, 128, 64))
     add_row("Bultos Sin Asignar (En Estacion / Sin Ruta)", sin_asignar, (245, 235, 255), (77, 20, 140))
-    add_row("Sin aplazar ni STAT 44", sin_aplazar_44, (255, 230, 230), (200, 0, 0))
+    add_row("Sin Movimiento (Solo SIP, Sin Excepciones)", count_sin_mov, (255, 230, 230), (200, 0, 0))
     
-    # --- SECCIÓN 3: ANEXO DE ACCIÓN RÁPIDA (Solo si hay críticos) ---
+    def imprimir_cabecera_tabla_roja():
+        pdf.set_fill_color(200, 0, 0)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Arial", 'B', 9)
+        pdf.cell(35, 8, txt="Tracking", border=1, fill=True)
+        pdf.cell(45, 8, txt="Cliente", border=1, fill=True)
+        pdf.cell(30, 8, txt="Comuna", border=1, fill=True)
+        pdf.cell(65, 8, txt="Direccion", border=1, fill=True)
+        pdf.cell(15, 8, txt="Status", border=1, fill=True, ln=True)
+
     if not df_criticos.empty:
-        pdf.add_page() # Salto a página 2
+        pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
-        pdf.set_text_color(200, 0, 0) # Rojo alerta
-        pdf.cell(0, 10, txt="ANEXO: BULTOS CRITICOS (SIN APLAZAR NI STAT 44)", ln=True)
+        pdf.set_text_color(200, 0, 0) 
+        pdf.cell(0, 10, txt="ANEXO: BULTOS CRITICOS SIN MOVIMIENTO", ln=True)
         
         pdf.set_font("Arial", 'I', 10)
         pdf.set_text_color(50, 50, 50)
-        pdf.cell(0, 6, txt="La siguiente lista requiere accion y rastreo inmediato en piso:", ln=True)
+        pdf.cell(0, 6, txt="Listado con Status SIP sin ningun escaneo (44, 53, 50, 37, 27, DEX 03/07):", ln=True)
         pdf.ln(4)
         
-        # Cabecera tabla anexo
-        pdf.set_fill_color(200, 0, 0)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Arial", 'B', 10)
-        pdf.cell(45, 8, txt="Tracking Number", border=1, fill=True)
-        pdf.cell(100, 8, txt="Cliente / Empresa", border=1, fill=True)
-        pdf.cell(45, 8, txt="Status DREUI", border=1, fill=True, ln=True)
+        imprimir_cabecera_tabla_roja()
         
-        # Filas tabla anexo (Limitado a los primeros 45 para no desbordar el diseño)
         pdf.set_text_color(0, 0, 0)
-        pdf.set_font("Arial", '', 9)
+        pdf.set_font("Arial", '', 8)
         
-        for _, row in df_criticos.head(45).iterrows():
-            trk = str(row.get('Tracking Number', 'N/A'))
-            
-            # Extraer cliente priorizando Company, si no Name. Cortamos a 50 chars max.
-            shp = str(row.get('Shipper Company', str(row.get('Shipper Name', 'N/A'))))[:50] 
-            
-            stat = str(row.get('Status', str(row.get('status', 'N/A'))))[:20]
-            
-            pdf.cell(45, 7, txt=trk, border=1)
-            pdf.cell(100, 7, txt=shp, border=1)
-            pdf.cell(45, 7, txt=stat, border=1, ln=True)
-            
-        if len(df_criticos) > 45:
-            pdf.set_font("Arial", 'I', 10)
-            pdf.cell(0, 8, txt=f"... y {len(df_criticos) - 45} bultos mas no mostrados aqui.", border=0, ln=True)
+        for _, row in df_criticos.iterrows():
+            if pdf.get_y() > 270:
+                pdf.add_page()
+                imprimir_cabecera_tabla_roja()
+                pdf.set_text_color(0, 0, 0)
+                pdf.set_font("Arial", '', 8)
 
-    # --- PIE DE PÁGINA ---
+            trk = clean_pdf_text(row.get('Tracking Number', 'N/A'))[:15]
+            shp = clean_pdf_text(row.get('Shipper Company', row.get('Shipper Name', 'N/A')))[:25]
+            comuna = clean_pdf_text(row.get('Recip City', 'N/A'))[:15]
+            direccion = clean_pdf_text(row.get('CE Recp Address All', 'N/A'))[:35]
+            stat = clean_pdf_text(row.get('Status', row.get('status', 'N/A')))[:6]
+            
+            pdf.cell(35, 6, txt=trk, border=1)
+            pdf.cell(45, 6, txt=shp, border=1)
+            pdf.cell(30, 6, txt=comuna, border=1)
+            pdf.cell(65, 6, txt=direccion, border=1)
+            pdf.cell(15, 6, txt=stat, border=1, ln=True)
+
     pdf.set_y(-15)
     pdf.set_font("Arial", 'I', 8)
     pdf.set_text_color(128, 128, 128)
@@ -295,22 +301,32 @@ def generar_pdf_avanzado(fecha_str, auditor, total, tricot, sin_asignar, en_ruta
             return f.read()
 
 # ==============================================================================
-# 5. BARRA LATERAL
+# 5. BARRA LATERAL CON FORMULARIO ESTABLE
 # ==============================================================================
 st.sidebar.header("📥 Ingreso de Datos")
 st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
-uploaded_files = st.sidebar.file_uploader("", type=["xlsx"], accept_multiple_files=True)
 
-if "history" not in st.session_state: st.session_state.history = {}
+if "history" not in st.session_state: 
+    st.session_state.history = {}
 
-if uploaded_files:
+# Novedad: Formulario para evitar recargas automáticas que interrumpen la subida
+with st.sidebar.form("upload_form", clear_on_submit=False):
+    uploaded_files = st.file_uploader("", type=["xlsx"], accept_multiple_files=True)
+    btn_procesar = st.form_submit_button("⚙️ Procesar Archivos")
+
+if btn_procesar and uploaded_files:
     for file in uploaded_files:
         if file.name not in st.session_state.history:
             with st.spinner(f"Procesando {file.name}..."):
                 df_vapa, df_bodega = VapaEngine.process_file(file)
                 if df_vapa is not None:
                     st.session_state.history[file.name] = {"vapa": df_vapa, "bodega": df_bodega}
-    st.sidebar.success("✅ Archivos procesados.")
+    st.sidebar.success("✅ Archivos procesados exitosamente.")
+
+if st.session_state.history:
+    if st.sidebar.button("🗑️ Limpiar Memoria (Reiniciar)"):
+        st.session_state.history = {}
+        st.rerun()
 
 # ==============================================================================
 # 6. DASHBOARD INTERACTIVO
@@ -361,7 +377,6 @@ if st.session_state.history:
 
     st.divider()
 
-    # --- LÓGICA DE EXCEPCIONES Y EN RUTA ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
@@ -373,23 +388,33 @@ if st.session_state.history:
     else:
         df_44 = pd.DataFrame()
         
-    # En Ruta
     if 'VAN All' in df_vapa.columns:
         filtro_en_ruta = df_vapa['VAN All'].notna() & (df_vapa['VAN All'].astype(str).str.strip() != "")
         df_en_ruta = df_vapa[filtro_en_ruta]
     else:
         df_en_ruta = pd.DataFrame()
         
-    # Sin aplazar ni STAT 44
-    if 'STAT 44 Date Time Latest' in df_bodega.columns:
-        bodega_has_44 = df_bodega['STAT 44 Date Time Latest'].notna()
+    status_col = 'status' if 'status' in df_bodega.columns else 'Status' if 'Status' in df_bodega.columns else None
+    if status_col:
+        is_sip = df_bodega[status_col].astype(str).str.strip().str.upper() == 'SIP'
     else:
-        bodega_has_44 = pd.Series(False, index=df_bodega.index)
+        is_sip = pd.Series(True, index=df_bodega.index)
         
-    df_sin_aplazar_44 = df_bodega[~bodega_has_44]
+    has_stat = pd.Series(False, index=df_bodega.index)
+    for stat_col in ['STAT 44 Date Time Latest', 'STAT 50 Latest', 'STAT 53 All', 'STAT 37 Latest', 'STAT 27 Latest']:
+        if stat_col in df_bodega.columns:
+            has_stat = has_stat | df_bodega[stat_col].notna()
+            
+    has_dex = pd.Series(False, index=df_bodega.index)
+    if 'DEX All' in df_bodega.columns:
+        dex_col = df_bodega['DEX All'].astype(str).str.upper()
+        has_dex = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07', regex=True, na=False)
+        
+    df_sin_mov = df_bodega[is_sip & ~has_stat & ~has_dex]
     
-    m_50, m_53, m_44, m_en_ruta, count_sin_aplazar_44, sin_mov = len(df_50), len(df_53), len(df_44), len(df_en_ruta), len(df_sin_aplazar_44), len(df_bodega)
-    cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
+    m_50, m_53, m_44, m_en_ruta, count_sin_mov, sin_mov_total = len(df_50), len(df_53), len(df_44), len(df_en_ruta), len(df_sin_mov), len(df_bodega)
+    
+    cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
     
     tab1, tab2, tab3 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo"])
@@ -397,13 +422,11 @@ if st.session_state.history:
     with tab1:
         st.markdown("### Resumen de Excepciones e Inventario")
         
-        # --- UI PARA GENERAR Y DESCARGAR PDF AVANZADO ---
         if HAS_FPDF:
             with st.container():
                 st.markdown("<div style='background-color: #1E1E1E; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #FF6600;'>", unsafe_allow_html=True)
                 col_pdf1, col_pdf2 = st.columns([2, 1])
                 with col_pdf1:
-                    # Input para la firma. Placeholder con tu nombre como ejemplo visual rápido
                     auditor_name = st.text_input("👤 Nombre del Supervisor/Auditor para el reporte:", placeholder="Ej. Anderson Gómez")
                 with col_pdf2:
                     st.write("") 
@@ -414,10 +437,10 @@ if st.session_state.history:
                         auditor=auditor_name,
                         total=total_ingreso,
                         tricot=tricot_count,
-                        sin_asignar=sin_mov, 
+                        sin_asignar=sin_mov_total, 
                         en_ruta=m_en_ruta,   
-                        sin_aplazar_44=count_sin_aplazar_44,
-                        df_criticos=df_sin_aplazar_44
+                        count_sin_mov=count_sin_mov,
+                        df_criticos=df_sin_mov
                     )
                     st.download_button(
                         label="📄 Descargar Reporte PDF",
@@ -453,17 +476,17 @@ if st.session_state.history:
                 if m_en_ruta > 0: st.dataframe(df_en_ruta[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                 else: st.write("Vacío")
         with col5: 
-            st.markdown(f"<div class='metric-box' style='border-bottom-color:#E63946;'><span class='metric-title'>Sin aplazar ni 44</span><span class='metric-value' style='color:#E63946;'>{count_sin_aplazar_44}</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-box' style='border-bottom-color:#E63946;'><span class='metric-title'>Sin Movimiento</span><span class='metric-value' style='color:#E63946;'>{count_sin_mov}</span></div>", unsafe_allow_html=True)
             with st.expander("👁️ Ver"): 
-                if count_sin_aplazar_44 > 0: st.dataframe(df_sin_aplazar_44[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                if count_sin_mov > 0: st.dataframe(df_sin_mov[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                 else: st.write("Vacío")
         with col6: 
-            st.markdown(f"<div class='metric-box' style='border-bottom-color:#4D148C;'><span class='metric-title'>En Estación</span><span class='metric-value' style='color:#4D148C;'>{sin_mov}</span></div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric-box' style='border-bottom-color:#4D148C;'><span class='metric-title'>En Estación</span><span class='metric-value' style='color:#4D148C;'>{sin_mov_total}</span></div>", unsafe_allow_html=True)
             with st.expander("👁️ Ver"): 
-                if sin_mov > 0: st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                if sin_mov_total > 0: st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                 else: st.write("Vacío")
 
-        chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "En Ruta", "Sin aplazar ni STAT 44", "En Estación"], "Bultos": [m_50, m_53, m_44, m_en_ruta, count_sin_aplazar_44, sin_mov], "Color": ["#FF6600", "#FF6600", "#FF6600", "#06D6A0", "#E63946", "#4D148C"]})
+        chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "En Ruta", "Sin Movimiento", "En Estación"], "Bultos": [m_50, m_53, m_44, m_en_ruta, count_sin_mov, sin_mov_total], "Color": ["#FF6600", "#FF6600", "#FF6600", "#06D6A0", "#E63946", "#4D148C"]})
         fig = px.bar(chart_data, x="Categoría", y="Bultos", text="Bultos", color="Categoría", color_discrete_sequence=chart_data["Color"].tolist(), template="plotly_dark")
         fig.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=30, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
