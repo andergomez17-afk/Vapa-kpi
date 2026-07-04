@@ -172,7 +172,7 @@ def clean_pdf_text(text):
 # ==============================================================================
 # 4. GENERADOR DE PDF OPERATIVO AVANZADO
 # ==============================================================================
-def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_estacion, en_ruta, count_falta_44, df_criticos, total_compromiso):
+def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
@@ -208,7 +208,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_e
     pdf.cell(0, 10, txt="1. INDICADORES DE RENDIMIENTO (SOBRE COMPROMISOS VENCIDOS O DE HOY)", ln=True)
     
     if total_compromiso > 0:
-        pct_fallando = round((bultos_estacion / total_compromiso) * 100, 1)
+        pct_fallando = round((corregir_total / total_compromiso) * 100, 1)
         pct_exito = round(100.0 - pct_fallando, 1)
     else:
         pct_exito, pct_fallando = 0, 0
@@ -221,7 +221,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_e
     pdf.rect(90, pdf.get_y() + 2, int(pct_exito), 4, 'F')
     pdf.ln(8)
     
-    pdf.cell(80, 8, txt=f"Fallando Compromiso (En Estacion) ({pct_fallando}%):")
+    pdf.cell(80, 8, txt=f"Fallando Compromiso (Corregir Stat 44) ({pct_fallando}%):")
     pdf.set_fill_color(220, 220, 220)
     pdf.rect(90, pdf.get_y() + 2, 100, 4, 'F')
     pdf.set_fill_color(200, 0, 0)
@@ -256,8 +256,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_e
         else:
             add_row(f"Ingreso Cliente {cli['nombre']}", cli['cantidad'], (245, 235, 255), (77, 20, 140))
             
-    add_row("Bultos en la Estacion (Fallando Compromiso)", bultos_estacion, (235, 235, 235), (50, 50, 50))
-    add_row("Falta Stat 44 y Aplazar (Fallando sin Escaneo)", count_falta_44, (255, 230, 230), (200, 0, 0))
+    add_row("Corregir Stat 44 y Aplazar (Fallando Compromiso)", corregir_total, (255, 230, 230), (200, 0, 0))
     
     # Anexo Tabla Roja
     def imprimir_cabecera_tabla_roja():
@@ -274,7 +273,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_e
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
         pdf.set_text_color(200, 0, 0) 
-        pdf.cell(0, 10, txt="ANEXO: BULTOS CRITICOS (FALTA STAT 44 Y APLAZAR)", ln=True)
+        pdf.cell(0, 10, txt="ANEXO: BULTOS CRITICOS (CORREGIR STAT 44 Y APLAZAR)", ln=True)
         pdf.ln(4)
         
         imprimir_cabecera_tabla_roja()
@@ -347,7 +346,7 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
-    # Inicializar variable para el botón de ver fallos si no existe
+    # Inicializar variable para el botón de ver fallos
     if "ver_fallos_kpi" not in st.session_state:
         st.session_state.ver_fallos_kpi = False
         
@@ -360,7 +359,8 @@ if st.session_state.history:
         df_en_ruta = pd.DataFrame()
     m_en_ruta = len(df_en_ruta)
     
-    bultos_estacion_total = len(df_bodega)
+    # Bultos fallando compromiso (Toda la carga estancada)
+    corregir_44_aplazar_total = len(df_bodega)
     
     if 'Commit Date' in df_vapa.columns:
         fechas_entrega_vapa = pd.to_datetime(df_vapa['Commit Date'], errors='coerce').dt.date
@@ -371,7 +371,7 @@ if st.session_state.history:
 
     # --- CÁLCULO DE KPIs ---
     if total_compromiso_hoy > 0:
-        pct_fallando = round((bultos_estacion_total / total_compromiso_hoy) * 100, 1)
+        pct_fallando = round((corregir_44_aplazar_total / total_compromiso_hoy) * 100, 1)
         pct_exito = round(100.0 - pct_fallando, 1)
     else:
         pct_exito, pct_fallando = 0, 0
@@ -392,11 +392,11 @@ if st.session_state.history:
                 </div>
             </div>
         """, unsafe_allow_html=True)
-        st.write("") # Espaciador simétrico
+        st.write("") 
     with col_kpi2:
         st.markdown(f"""
             <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #E63946; margin-bottom: 5px;'>
-                <span style='color:#A0A0A0; font-size:12px; text-transform:uppercase;'>Fallando Compromiso (En Estación)</span><br>
+                <span style='color:#A0A0A0; font-size:12px; text-transform:uppercase;'>Fallando Compromiso (Corregir Stat 44)</span><br>
                 <span style='color:#FFFFFF; font-size:28px; font-weight:bold;'>{pct_fallando}%</span>
                 <div style='background-color:#2F2F2F; border-radius:5px; margin-top:5px; height:8px; width:100%;'>
                     <div style='background-color:#E63946; border-radius:5px; height:8px; width:{pct_fallando}%;'></div>
@@ -404,14 +404,12 @@ if st.session_state.history:
             </div>
         """, unsafe_allow_html=True)
         
-        # BOTÓN INTERACTIVO PARA DESPLEGAR DETALLES DEL KPI FALLIDO
         if st.button("🔍 Ver Bultos que Afectan este %", use_container_width=True):
             st.session_state.ver_fallos_kpi = not st.session_state.ver_fallos_kpi
 
-    # DESPLIEGUE DINÁMICO DE BULTOS DETENIDOS SI EL BOTÓN FUE CLICKEADO
     if st.session_state.ver_fallos_kpi:
-        st.error("🚨 Carga en Estación que está Provocando el Incumplimiento del KPI:")
-        if bultos_estacion_total > 0:
+        st.error("🚨 Listado de bultos que deben ser Corregidos / Aplazados:")
+        if corregir_44_aplazar_total > 0:
             st.dataframe(df_bodega[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
         else:
             st.write("No hay registros que afecten el compromiso.")
@@ -470,7 +468,7 @@ if st.session_state.history:
 
     st.divider()
 
-    # --- LÓGICA DE FILTRADOS RESTANTES ---
+    # --- LÓGICA DE TARJETAS DE EXCEPCIONES ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
@@ -482,18 +480,18 @@ if st.session_state.history:
     else:
         df_44 = pd.DataFrame()
         
-    has_stat = pd.Series(False, index=df_bodega.index)
-    for stat_col in ['STAT 44 Date Time Latest', 'STAT 50 Latest', 'STAT 53 All', 'STAT 37 Latest', 'STAT 27 Latest']:
-        if stat_col in df_bodega.columns:
-            has_stat = has_stat | df_bodega[stat_col].notna()
-            
-    has_dex = pd.Series(False, index=df_bodega.index)
-    if 'DEX All' in df_bodega.columns:
-        dex_col = df_bodega['DEX All'].astype(str).str.upper()
-        has_dex = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07', regex=True, na=False)
-        
-    df_falta_44 = df_bodega[~has_stat & ~has_dex]
-    m_50, m_53, m_44, count_falta_44 = len(df_50), len(df_53), len(df_44), len(df_falta_44)
+    m_50, m_53, m_44 = len(df_50), len(df_53), len(df_44)
+    
+    # Lista para ordenar dinámicamente las tarjetas de mayor a menor
+    metricas_operativas = [
+        {"nombre": "STAT 50", "cantidad": m_50, "df": df_50, "color": "#FF6600"},
+        {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
+        {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
+        {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
+        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_bodega, "color": "#E63946"}
+    ]
+    
+    metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
     
     tab1, tab2, tab3 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo"])
     
@@ -515,10 +513,9 @@ if st.session_state.history:
                         auditor=auditor_name,
                         total=total_ingreso,
                         clientes_ordenados=clientes_ordenados,
-                        bultos_estacion=bultos_estacion_total, 
+                        corregir_total=corregir_44_aplazar_total, 
                         en_ruta=m_en_ruta,   
-                        count_falta_44=count_falta_44,
-                        df_criticos=df_falta_44,
+                        df_criticos=df_bodega,
                         total_compromiso=total_compromiso_hoy
                     )
                     st.download_button(
@@ -529,39 +526,38 @@ if st.session_state.history:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        # Renderizado de Tarjetas Ordenadas
+        cols_metricas = st.columns(len(metricas_ordenadas))
         
-        with col1: 
-            st.markdown(f"<div class='metric-box'><span class='metric-title'>STAT 50</span><span class='metric-value' style='color:#FF6600;'>{m_50}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver"): 
-                if m_50 > 0: st.dataframe(df_50[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Vacío")
-        with col2: 
-            st.markdown(f"<div class='metric-box'><span class='metric-title'>STAT 53</span><span class='metric-value' style='color:#FF6600;'>{m_53}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver"): 
-                if m_53 > 0: st.dataframe(df_53[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Vacío")
-        with col3: 
-            st.markdown(f"<div class='metric-box'><span class='metric-title'>Solo STAT 44</span><span class='metric-value' style='color:#FF6600;'>{m_44}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver"): 
-                if m_44 > 0: st.dataframe(df_44[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Vacío")
-        with col4: 
-            st.markdown(f"<div class='metric-box' style='border-bottom-color:#06D6A0;'><span class='metric-title'>En Ruta</span><span class='metric-value' style='color:#06D6A0;'>{m_en_ruta}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver"): 
-                if m_en_ruta > 0: st.dataframe(df_en_ruta[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Vacío")
-        with col5: 
-            st.markdown(f"<div class='metric-box' style='border-bottom-color:#E63946;'><span class='metric-title'>Falta Stat 44 y Aplazar</span><span class='metric-value' style='color:#E63946;'>{count_falta_44}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver"): 
-                if count_falta_44 > 0: st.dataframe(df_falta_44[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Vacío")
-        with col6: 
-            st.markdown(f"<div class='metric-box' style='border-bottom-color:#4D148C;'><span class='metric-title'>Bultos en Estación</span><span class='metric-value' style='color:#4D148C;'>{bultos_estacion_total}</span></div>", unsafe_allow_html=True)
-            with st.expander("👁️ Ver"): 
-                if bultos_estacion_total > 0: st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                else: st.write("Vacío")
+        for i, col in enumerate(cols_metricas):
+            m = metricas_ordenadas[i]
+            with col:
+                st.markdown(f"<div class='metric-box' style='border-bottom-color:{m['color']};'><span class='metric-title'>{m['nombre']}</span><span class='metric-value' style='color:{m['color']};'>{m['cantidad']}</span></div>", unsafe_allow_html=True)
+                with st.expander("👁️ Ver"): 
+                    if m['cantidad'] > 0: 
+                        st.dataframe(m['df'][cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                    else: 
+                        st.write("Vacío")
+
+        # Gráfico dinámico basado en las métricas ordenadas
+        chart_data = pd.DataFrame({
+            "Categoría": [m["nombre"] for m in metricas_ordenadas],
+            "Bultos": [m["cantidad"] for m in metricas_ordenadas],
+            "Color": [m["color"] for m in metricas_ordenadas]
+        })
+        
+        fig = px.bar(chart_data, x="Categoría", y="Bultos", text="Bultos", color="Categoría", color_discrete_sequence=chart_data["Color"].tolist(), template="plotly_dark")
+        fig.update_layout(
+            showlegend=False, height=350, margin=dict(l=0, r=0, t=30, b=0), 
+            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            dragmode=False
+        )
+        fig.update_xaxes(fixedrange=True)
+        fig.update_yaxes(fixedrange=True)
+        st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with tab2:
         st.markdown("### Motor de Búsqueda y Filtrado")
