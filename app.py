@@ -170,9 +170,9 @@ def clean_pdf_text(text):
     return str(text).encode('latin-1', 'replace').decode('latin-1')
 
 # ==============================================================================
-# 4. GENERADOR DE PDF OPERATIVO ACTUALIZADO
+# 4. GENERADOR DE PDF OPERATIVO ACTUALIZADO (Orden Lógico y de Mayor a Menor)
 # ==============================================================================
-def generar_pdf_avanzado(fecha_str, auditor, total, tricot, bultos_estacion, en_ruta, count_falta_44, df_criticos, total_compromiso):
+def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, bultos_estacion, en_ruta, count_falta_44, df_criticos, total_compromiso):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
@@ -229,7 +229,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, tricot, bultos_estacion, en_
     pdf.rect(90, pdf.get_y() + 2, int(pct_fallando), 4, 'F')
     pdf.ln(12)
 
-    # --- SECCIÓN 2: RESUMEN VOLUMÉTRICO ---
+    # --- SECCIÓN 2: RESUMEN VOLUMÉTRICO (NUEVO ORDEN) ---
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, txt="2. RESUMEN VOLUMETRICO DE BULTOS", ln=True)
@@ -248,11 +248,20 @@ def generar_pdf_avanzado(fecha_str, auditor, total, tricot, bultos_estacion, en_
     pdf.cell(145, 8, txt="  ESTADO LOGISTICO", border=1, fill=True)
     pdf.cell(45, 8, txt="CANTIDAD", border=1, fill=True, align='C', ln=True)
 
+    # 1. Total y en Ruta
     add_row("Total Procesados (Llegaron Hoy a la Estacion)", total, (255, 255, 255), (0, 0, 0))
-    add_row("Total Ingreso Cliente TRICOT", tricot, (255, 245, 235), (255, 102, 0))
     add_row("Bultos en Ruta (Carga Asignada en VAN)", en_ruta, (230, 250, 230), (0, 128, 64))
-    add_row("Bultos en la Estacion (Fallando Compromiso)", bultos_estacion, (245, 235, 255), (77, 20, 140))
-    add_row("Falta Stat 44 y Aplazar (Fallando Compromiso sin Escaneo)", count_falta_44, (255, 230, 230), (200, 0, 0))
+    
+    # 2. Clientes Dinámicos de Mayor a Menor
+    for cli in clientes_ordenados:
+        if cli['nombre'] == 'Tricot':
+            add_row(f"Ingreso Cliente {cli['nombre']}", cli['cantidad'], (255, 245, 235), (255, 102, 0))
+        else:
+            add_row(f"Ingreso Cliente {cli['nombre']}", cli['cantidad'], (245, 235, 255), (77, 20, 140))
+            
+    # 3. Resumen de Estación y Fallos
+    add_row("Bultos en la Estacion (Fallando Compromiso)", bultos_estacion, (235, 235, 235), (50, 50, 50))
+    add_row("Falta Stat 44 y Aplazar (Fallando sin Escaneo)", count_falta_44, (255, 230, 230), (200, 0, 0))
     
     # --- SECCIÓN 3: ANEXO DE ACCIÓN RÁPIDA ---
     def imprimir_cabecera_tabla_roja():
@@ -436,11 +445,23 @@ if st.session_state.history:
         
         df_ingreso = pd.DataFrame({"Categoría": cat_names, "Cantidad": cat_counts, "Color": cat_colors})
         
+        # Gráfico estático sin zoom ni barra de herramientas
         fig_ingreso = px.bar(df_ingreso, x="Categoría", y="Cantidad", text="Cantidad", 
                              color="Categoría", color_discrete_sequence=df_ingreso["Color"].tolist(),
                              template="plotly_dark", title="Distribución de Ingreso Relevante")
-        fig_ingreso.update_layout(showlegend=False, height=380, margin=dict(l=0, r=0, t=40, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_ingreso, use_container_width=True)
+        fig_ingreso.update_layout(
+            showlegend=False, 
+            height=380, 
+            margin=dict(l=0, r=0, t=40, b=0), 
+            plot_bgcolor='rgba(0,0,0,0)', 
+            paper_bgcolor='rgba(0,0,0,0)',
+            dragmode=False  # Bloquea el arrastre y selección
+        )
+        fig_ingreso.update_xaxes(fixedrange=True) # Bloquea zoom en X
+        fig_ingreso.update_yaxes(fixedrange=True) # Bloquea zoom en Y
+        
+        # displayModeBar=False quita los botones flotantes de plotly
+        st.plotly_chart(fig_ingreso, use_container_width=True, config={'displayModeBar': False})
 
     st.divider()
 
@@ -492,7 +513,7 @@ if st.session_state.history:
                         fecha_str=datetime.now().strftime('%d-%m-%Y %H:%M'),
                         auditor=auditor_name,
                         total=total_ingreso,
-                        tricot=tricot_count,
+                        clientes_ordenados=clientes_ordenados,
                         bultos_estacion=bultos_estacion_total, 
                         en_ruta=m_en_ruta,   
                         count_falta_44=count_falta_44,
