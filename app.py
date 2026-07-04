@@ -41,7 +41,7 @@ st.markdown("""
     .metric-value { font-size: 32px; font-weight: 900; color: #FFFFFF; display: block; }
     
     .login-box {
-        max-width: 400px; margin: 80px auto; padding: 40px; 
+        max-width: 400px; margin: 40px auto; padding: 35px; 
         background-color: #1A1A1A; border-radius: 15px; 
         border-top: 5px solid #4D148C; border-bottom: 5px solid #FF6600;
         box-shadow: 0px 10px 30px rgba(0,0,0,0.8);
@@ -58,7 +58,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CAPA DE SEGURIDAD (LOGIN)
+# 2. CAPA DE SEGURIDAD (LOGIN OPTIMIZADO)
 # ==============================================================================
 def check_password():
     if "password_correct" not in st.session_state:
@@ -66,8 +66,21 @@ def check_password():
 
     if not st.session_state["password_correct"]:
         st.markdown("<div class='login-box'>", unsafe_allow_html=True)
-        st.markdown("<h2 style='text-align: center; color: #FF6600;'>📦 Terminal VAPA</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #A0A0A0;'>Control de Operaciones e Inventario</p>", unsafe_allow_html=True)
+        
+        # Centrar logo e integrar el nombre FedEx VAPA con los colores exactos
+        c1, c2, c3 = st.columns([1, 2, 1])
+        with c2:
+            st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/FedEx_Express_logo.svg/512px-FedEx_Express_logo.svg.png", use_container_width=True)
+        
+        st.markdown("""
+            <h2 style='text-align: center; margin-top: 10px; margin-bottom: 5px;'>
+                <span style='color: #4D148C; font-weight: 900;'>FedEx</span> 
+                <span style='color: #FF6600; font-weight: 900;'>VAPA</span>
+            </h2>
+            <p style='text-align: center; color: #A0A0A0; font-size: 14px; margin-bottom: 20px;'>
+                Control de Operaciones e Inventario
+            </p>
+        """, unsafe_allow_html=True)
         
         pwd = st.text_input("Clave de Acceso", type="password", placeholder="Ingresa la credencial...")
         if st.button("Iniciar Sesión"):
@@ -165,12 +178,10 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
-    # --- LÓGICA DE FILTROS ACTUALIZADA ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     df_17 = df_vapa[df_vapa['DEX All'].astype(str).str.contains('DEX\\[17\\]', na=False)] if 'DEX All' in df_vapa.columns else pd.DataFrame()
     
-    # NUEVO: Filtro para "Solo STAT 44" excluyendo bultos que ya tienen DEX 17
     if 'STAT 44 Date Time Latest' in df_vapa.columns:
         filtro_44 = df_vapa['STAT 44 Date Time Latest'].notna() & (df_vapa['VAN All'].isna() | (df_vapa['VAN All'].astype(str).str.strip() == ""))
         if 'DEX All' in df_vapa.columns:
@@ -220,7 +231,7 @@ if st.session_state.history:
         fig.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=30, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
 
-    # --- PESTAÑA 2: BASE DE DATOS ---
+# --- PESTAÑA 2: BASE DE DATOS ---
     with tab2:
         st.markdown("### Motor de Búsqueda y Filtrado")
         c_search, c_filter = st.columns([3, 1])
@@ -255,4 +266,3 @@ if st.session_state.history:
 
 else:
     st.info("👋 ¡Hola! Despliega el menú lateral y adjunta el archivo generado por DREUI para empezar.")
-            
