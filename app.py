@@ -3,6 +3,14 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from datetime import datetime
+import tempfile
+
+# Intentar importar la librería para PDF
+try:
+    from fpdf import FPDF
+    HAS_FPDF = True
+except ImportError:
+    HAS_FPDF = False
 
 # ==============================================================================
 # 1. CONFIGURACIÓN DE LA INTERFAZ Y ESTILOS FEDEX PREMIER
@@ -59,7 +67,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CAPA DE SEGURIDAD (LOGIN INTEGRADO EN CAJA - SIN IMÁGENES ROTAS)
+# 2. CAPA DE SEGURIDAD (LOGIN INTEGRADO EN CAJA)
 # ==============================================================================
 def check_password():
     if "password_correct" not in st.session_state:
@@ -67,7 +75,6 @@ def check_password():
 
     if not st.session_state["password_correct"]:
         with st.form("login_form"):
-            # Usamos solo texto estilizado para evitar el error de red de la imagen
             st.markdown("""
                 <div style='text-align: center; padding-bottom: 15px;'>
                     <h2 style='margin-top: 10px; margin-bottom: 5px; font-size: 42px;'>
@@ -140,7 +147,6 @@ class VapaEngine:
             return None, None
 
 def color_fedex_cliente(row):
-    # Método a prueba de balas para concatenar la fila sin causar TypeError
     fila_str = ""
     for val in row.values:
         if pd.notna(val):
@@ -153,6 +159,56 @@ def color_fedex_cliente(row):
         color = 'background-color: #4D148C; color: white;'
         
     return [color] * len(row)
+
+def generar_pdf_reporte(fecha_str, total, tricot, sin_asignar, aplazados, sin_movimiento_absoluto):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Encabezado
+    pdf.set_font("Arial", 'B', 16)
+    pdf.set_text_color(77, 20, 140) # Morado FedEx
+    pdf.cell(0, 10, txt="REPORTE OPERATIVO - FEDEX VAPA", ln=True, align='C')
+    pdf.set_font("Arial", 'B', 12)
+    pdf.set_text_color(255, 102, 0) # Naranja FedEx
+    pdf.cell(0, 10, txt=f"Monitor de Almacenamiento y Excepciones", ln=True, align='C')
+    pdf.ln(5)
+    
+    # Datos
+    pdf.set_font("Arial", '', 12)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(0, 10, txt=f"Fecha de Auditoria: {fecha_str}", ln=True)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(5)
+    
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 10, txt="RESUMEN DE INGRESOS Y ESTADO DE BULTOS", ln=True)
+    pdf.set_font("Arial", '', 12)
+    
+    pdf.cell(140, 10, txt="1. Total de Bultos Procesados (Llegaron Hoy):", border=0)
+    pdf.cell(0, 10, txt=str(total), border=0, ln=True, align='R')
+    
+    pdf.cell(140, 10, txt="2. Total Llegaron Tricot:", border=0)
+    pdf.cell(0, 10, txt=str(tricot), border=0, ln=True, align='R')
+    
+    pdf.cell(140, 10, txt="3. Bultos Sin Asignar (En estacion / Sin Ruta):", border=0)
+    pdf.cell(0, 10, txt=str(sin_asignar), border=0, ln=True, align='R')
+    
+    pdf.cell(140, 10, txt="4. Aplazados (Falta 44 y Aplazar):", border=0)
+    pdf.cell(0, 10, txt=str(aplazados), border=0, ln=True, align='R')
+    
+    pdf.cell(140, 10, txt="5. Sin Movimiento Absoluto (Sin 44 ni 17):", border=0)
+    pdf.cell(0, 10, txt=str(sin_movimiento_absoluto), border=0, ln=True, align='R')
+    
+    pdf.ln(10)
+    pdf.set_font("Arial", 'I', 10)
+    pdf.set_text_color(128, 128, 128)
+    pdf.cell(0, 10, txt="Documento generado automaticamente por el Sistema de Monitoreo VAPA.", ln=True, align='C')
+    
+    # Guardar en un archivo temporal de forma segura
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        pdf.output(tmp.name)
+        with open(tmp.name, "rb") as f:
+            return f.read()
 
 # ==============================================================================
 # 4. BARRA LATERAL
@@ -187,7 +243,6 @@ if st.session_state.history:
     total_ingreso = len(df_vapa)
     
     if not df_vapa.empty:
-        # Solución al TypeError: Bucle seguro columna por columna
         filas_unidas = pd.Series("", index=df_vapa.index)
         for col in df_vapa.columns:
             filas_unidas += df_vapa[col].fillna('').astype(str).str.upper() + " "
@@ -236,7 +291,6 @@ if st.session_state.history:
     else:
         df_44 = pd.DataFrame()
         
-    # NUEVO: Lógica Falta 44 y Aplazar
     df_falta_44 = pd.DataFrame()
     if 'Commit Date' in df_vapa.columns:
         fechas_commit = pd.to_datetime(df_vapa['Commit Date'], errors='coerce').dt.date
@@ -249,6 +303,20 @@ if st.session_state.history:
             no_tiene_44_hoy = pd.Series(True, index=df_vapa.index)
             
         df_falta_44 = df_vapa[es_commit_hoy & no_tiene_44_hoy]
+        
+    # NUEVO CÁLCULO PARA EL PDF: Bultos sin movimiento absoluto (Sin 44 ni 17)
+    if 'STAT 44 Date Time Latest' in df_bodega.columns:
+        bodega_has_44 = df_bodega['STAT 44 Date Time Latest'].notna()
+    else:
+        bodega_has_44 = pd.Series(False, index=df_bodega.index)
+        
+    if 'DEX All' in df_bodega.columns:
+        bodega_has_17 = df_bodega['DEX All'].astype(str).str.contains('DEX\\[17\\]', na=False)
+    else:
+        bodega_has_17 = pd.Series(False, index=df_bodega.index)
+        
+    df_sin_mov_absoluto = df_bodega[~bodega_has_44 & ~bodega_has_17]
+    count_sin_mov_absoluto = len(df_sin_mov_absoluto)
     
     m_50, m_53, m_44, m_falta44, sin_mov = len(df_50), len(df_53), len(df_44), len(df_falta_44), len(df_bodega)
     cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
@@ -258,6 +326,25 @@ if st.session_state.history:
     
     with tab1:
         st.markdown("### Resumen de Excepciones e Inventario")
+        
+        # --- BOTÓN DE DESCARGA PDF ---
+        if HAS_FPDF:
+            pdf_bytes = generar_pdf_reporte(
+                fecha_str=datetime.now().strftime('%d-%m-%Y %H:%M'),
+                total=total_ingreso,
+                tricot=tricot_count,
+                sin_asignar=sin_mov, # En estación (no ruta)
+                aplazados=m_falta44,
+                sin_movimiento_absoluto=count_sin_mov_absoluto
+            )
+            st.download_button(
+                label="📄 Descargar Reporte en PDF",
+                data=pdf_bytes,
+                file_name=f"Reporte_VAPA_{fecha_hoy}.pdf",
+                mime="application/pdf"
+            )
+        else:
+            st.warning("⚠️ Para activar la descarga del PDF, debes agregar la palabra `fpdf` a tu archivo `requirements.txt` en GitHub.")
         
         col1, col2, col3, col4, col5 = st.columns(5)
         
