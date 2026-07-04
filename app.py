@@ -142,10 +142,12 @@ class VapaEngine:
             return None, None
 
 def color_fedex_cliente(row):
-    cliente = str(row.get('Shipper Name', ''))
+    cliente = str(row.get('Shipper Company', '')).upper()
     color = ''
-    if 'Tricot' in cliente: color = 'background-color: #FF6600; color: white;'
-    elif any(c in cliente for c in ['Cruz Verde', 'Intercarry', 'Farmacias Ahumada']): color = 'background-color: #4D148C; color: white;'
+    if 'TRICOT' in cliente: 
+        color = 'background-color: #FF6600; color: white;'
+    elif any(c in cliente for c in ['CRUZ VERDE', 'MAICAO', 'INTERCARRY', 'SOCOFAR', 'AHUMADA', 'FASA', 'MIGUEL TORRES']): 
+        color = 'background-color: #4D148C; color: white;'
     return [color] * len(row)
 
 # ==============================================================================
@@ -181,34 +183,37 @@ if st.session_state.history:
     st.markdown("### 📥 Ingreso Diario y Clientes Clave")
     
     total_ingreso = len(df_vapa)
-    if 'Shipper Name' in df_vapa.columns:
-        tricot_count = df_vapa[df_vapa['Shipper Name'].astype(str).str.contains('Tricot', case=False, na=False)].shape[0]
-        intercarry_count = df_vapa[df_vapa['Shipper Name'].astype(str).str.contains('Intercarry', case=False, na=False)].shape[0]
-        ahumada_count = df_vapa[df_vapa['Shipper Name'].astype(str).str.contains('Farmacias Ahumada', case=False, na=False)].shape[0]
+    if 'Shipper Company' in df_vapa.columns:
+        shipper_col = df_vapa['Shipper Company'].astype(str).str.upper()
+        tricot_count = shipper_col.str.contains('TRICOT', na=False).sum()
+        socofar_count = shipper_col.str.contains('CRUZ VERDE|MAICAO|INTERCARRY|SOCOFAR', na=False).sum()
+        fasa_count = shipper_col.str.contains('AHUMADA|FASA', na=False).sum()
+        miguel_count = shipper_col.str.contains('MIGUEL TORRES', na=False).sum()
     else:
-        tricot_count, intercarry_count, ahumada_count = 0, 0, 0
+        tricot_count, socofar_count, fasa_count, miguel_count = 0, 0, 0, 0
 
     c_chart, c_metrics = st.columns([2, 1])
     
     with c_metrics:
-        st.markdown(f"<div class='metric-box' style='padding: 10px; margin-bottom: 8px; border-bottom-color:#8D99AE;'><span class='metric-title' style='font-size:11px;'>Total Llegaron Hoy</span><span class='metric-value' style='font-size:22px;'>{total_ingreso}</span></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-box' style='padding: 10px; margin-bottom: 8px; border-bottom-color:#FF6600;'><span class='metric-title' style='font-size:11px;'>Tricot</span><span class='metric-value' style='font-size:22px; color:#FF6600;'>{tricot_count}</span></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-box' style='padding: 10px; margin-bottom: 8px; border-bottom-color:#4D148C;'><span class='metric-title' style='font-size:11px;'>Intercarry</span><span class='metric-value' style='font-size:22px; color:#4D148C;'>{intercarry_count}</span></div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='metric-box' style='padding: 10px; margin-bottom: 8px; border-bottom-color:#4D148C;'><span class='metric-title' style='font-size:11px;'>Farmacias Ahumada</span><span class='metric-value' style='font-size:22px; color:#4D148C;'>{ahumada_count}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; border-bottom-color:#8D99AE;'><span class='metric-title' style='font-size:11px;'>Total Llegaron Hoy</span><span class='metric-value' style='font-size:20px;'>{total_ingreso}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; border-bottom-color:#FF6600;'><span class='metric-title' style='font-size:11px;'>Tricot</span><span class='metric-value' style='font-size:20px; color:#FF6600;'>{tricot_count}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; border-bottom-color:#4D148C;'><span class='metric-title' style='font-size:11px;'>SOCOFAR</span><span class='metric-value' style='font-size:20px; color:#4D148C;'>{socofar_count}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; border-bottom-color:#4D148C;'><span class='metric-title' style='font-size:11px;'>FASA</span><span class='metric-value' style='font-size:20px; color:#4D148C;'>{fasa_count}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; border-bottom-color:#4D148C;'><span class='metric-title' style='font-size:11px;'>Miguel Torres</span><span class='metric-value' style='font-size:20px; color:#4D148C;'>{miguel_count}</span></div>", unsafe_allow_html=True)
 
     with c_chart:
         df_ingreso = pd.DataFrame({
-            "Categoría": ["Total General", "Tricot", "Intercarry", "Farm. Ahumada"],
-            "Cantidad": [total_ingreso, tricot_count, intercarry_count, ahumada_count],
-            "Color": ["#8D99AE", "#FF6600", "#4D148C", "#4D148C"]
+            "Categoría": ["Total", "Tricot", "SOCOFAR", "FASA", "Miguel Torres"],
+            "Cantidad": [total_ingreso, tricot_count, socofar_count, fasa_count, miguel_count],
+            "Color": ["#8D99AE", "#FF6600", "#4D148C", "#4D148C", "#4D148C"]
         })
         fig_ingreso = px.bar(df_ingreso, x="Categoría", y="Cantidad", text="Cantidad", 
                              color="Categoría", color_discrete_sequence=df_ingreso["Color"].tolist(),
                              template="plotly_dark", title="Distribución de Ingreso Relevante")
-        fig_ingreso.update_layout(showlegend=False, height=320, margin=dict(l=0, r=0, t=40, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+        fig_ingreso.update_layout(showlegend=False, height=400, margin=dict(l=0, r=0, t=40, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_ingreso, use_container_width=True)
 
-    st.divider() # Separador antes de las métricas de excepciones
+    st.divider()
 
     # --- LÓGICA DE FILTROS ACTUALIZADA (Sin DEX 17) ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
@@ -223,7 +228,7 @@ if st.session_state.history:
         df_44 = pd.DataFrame()
     
     m_50, m_53, m_44, sin_mov = len(df_50), len(df_53), len(df_44), len(df_bodega)
-    cols_to_check = ['Tracking Number', 'Shipper Name', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
+    cols_to_check = ['Tracking Number', 'Shipper Company', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
     
     tab1, tab2, tab3 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo"])
@@ -231,7 +236,6 @@ if st.session_state.history:
     with tab1:
         st.markdown("### Resumen de Excepciones e Inventario")
         
-        # Reducido a 4 columnas porque se eliminó el DEX 17
         col1, col2, col3, col4 = st.columns(4)
         
         with col1: 
@@ -255,7 +259,6 @@ if st.session_state.history:
                 if sin_mov > 0: st.dataframe(df_bodega[[c for c in cols_to_check if c in df_bodega.columns]].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                 else: st.write("Sin registros.")
 
-        # Gráfico actualizado sin DEX 17
         chart_data = pd.DataFrame({"Categoría": ["STAT 50", "STAT 53", "Solo STAT 44", "En Estación"], "Bultos": [m_50, m_53, m_44, sin_mov], "Color": ["#FF6600", "#FF6600", "#FF6600", "#4D148C"]})
         fig = px.bar(chart_data, x="Categoría", y="Bultos", text="Bultos", color="Categoría", color_discrete_sequence=chart_data["Color"].tolist(), template="plotly_dark")
         fig.update_layout(showlegend=False, height=350, margin=dict(l=0, r=0, t=30, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
