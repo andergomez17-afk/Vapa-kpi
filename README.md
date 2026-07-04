@@ -1,0 +1,2 @@
+# Vapa-kpi
+Inventario 
