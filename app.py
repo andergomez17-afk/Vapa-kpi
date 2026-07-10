@@ -359,15 +359,40 @@ if st.session_state.history:
         df_en_ruta = pd.DataFrame()
     m_en_ruta = len(df_en_ruta)
     
-    # Bultos fallando compromiso (Toda la carga estancada)
-    corregir_44_aplazar_total = len(df_bodega)
+    # -------------------------------------------------------------------------
+    # EXCLUSIÓN DE DEX 16 Y CÁLCULO DE BULTOS FALLANDO COMPROMISO REAL
+    # -------------------------------------------------------------------------
+    # 1. Identificar bultos que ya tienen gestión válida
+    has_stat = pd.Series(False, index=df_bodega.index)
+    for stat_col in ['STAT 44 Date Time Latest', 'STAT 50 Latest', 'STAT 53 All', 'STAT 37 Latest', 'STAT 27 Latest']:
+        if stat_col in df_bodega.columns:
+            has_stat = has_stat | df_bodega[stat_col].notna()
+
+    # 2. Identificar bultos con DEX excusados o en proceso (03, 07 y 16)
+    has_dex_excl = pd.Series(False, index=df_bodega.index)
+    if 'DEX All' in df_bodega.columns:
+        dex_col = df_bodega['DEX All'].astype(str).str.upper()
+        # Aquí filtramos estrictamente el DEX 16 para que no afecte
+        has_dex_excl = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07|DEX\[16\]|DEX 16', regex=True, na=False)
+        
+    # 3. La base real de bultos estancados (Sin Stat y Sin Dex excusado)
+    df_corregir = df_bodega[~has_stat & ~has_dex_excl]
+    corregir_44_aplazar_total = len(df_corregir)
     
+    # 4. Cálculo del denominador (Total Compromisos) excluyendo el DEX 16 de la base
     if 'Commit Date' in df_vapa.columns:
         fechas_entrega_vapa = pd.to_datetime(df_vapa['Commit Date'], errors='coerce').dt.date
         filtro_compromiso_vapa = fechas_entrega_vapa.isna() | (fechas_entrega_vapa <= datetime.now().date())
-        total_compromiso_hoy = len(df_vapa[filtro_compromiso_vapa])
+        df_compromiso = df_vapa[filtro_compromiso_vapa]
     else:
-        total_compromiso_hoy = len(df_vapa)
+        df_compromiso = df_vapa.copy()
+
+    if 'DEX All' in df_compromiso.columns:
+        has_dex_16_tot = df_compromiso['DEX All'].astype(str).str.upper().str.contains(r'DEX\[16\]|DEX 16', regex=True, na=False)
+        df_compromiso = df_compromiso[~has_dex_16_tot]
+
+    total_compromiso_hoy = len(df_compromiso)
+    # -------------------------------------------------------------------------
 
     # --- CÁLCULO DE KPIs ---
     if total_compromiso_hoy > 0:
@@ -378,6 +403,7 @@ if st.session_state.history:
 
     cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
+    cols_to_show = list(dict.fromkeys(cols_to_show))
 
     # --- KPIs PRINCIPALES ---
     st.markdown("### 📊 Indicadores de Rendimiento (Compromisos de Hoy)")
@@ -407,12 +433,23 @@ if st.session_state.history:
         if st.button("🔍 Ver Bultos que Afectan este %", use_container_width=True):
             st.session_state.ver_fallos_kpi = not st.session_state.ver_fallos_kpi
 
+    # MOSTRAR DETALLE MEJORADO SI SE HIZO CLIC
     if st.session_state.ver_fallos_kpi:
-        st.error("🚨 Listado de bultos que deben ser Corregidos / Aplazados:")
+        st.markdown("""
+            <div style='background-color:#4D148C; padding:10px; border-radius:5px; color:white; font-weight:bold; margin-bottom:10px; text-align:center;'>
+                🚨 DETALLE DE BULTOS PARA CORREGIR (ACCIÓN INMEDIATA)
+            </div>
+        """, unsafe_allow_html=True)
+        
         if corregir_44_aplazar_total > 0:
-            st.dataframe(df_bodega[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+            st.dataframe(
+                df_corregir[cols_to_show].style.apply(color_fedex_cliente, axis=1), 
+                use_container_width=True, 
+                hide_index=True, 
+                height=350
+            )
         else:
-            st.write("No hay registros que afecten el compromiso.")
+            st.success("🎉 ¡Excelente! No hay registros pendientes que afecten el compromiso.")
 
     st.divider()
     
@@ -488,7 +525,7 @@ if st.session_state.history:
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
         {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
-        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_bodega, "color": "#E63946"}
+        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"}
     ]
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
@@ -515,7 +552,7 @@ if st.session_state.history:
                         clientes_ordenados=clientes_ordenados,
                         corregir_total=corregir_44_aplazar_total, 
                         en_ruta=m_en_ruta,   
-                        df_criticos=df_bodega,
+                        df_criticos=df_corregir,
                         total_compromiso=total_compromiso_hoy
                     )
                     st.download_button(
