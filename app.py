@@ -346,6 +346,7 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
+    # Inicializar variable para el botón de ver fallos
     if "ver_fallos_kpi" not in st.session_state:
         st.session_state.ver_fallos_kpi = False
         
@@ -358,57 +359,15 @@ if st.session_state.history:
         df_en_ruta = pd.DataFrame()
     m_en_ruta = len(df_en_ruta)
     
-    # ---------------------------------------------------------
-    # EXCLUSIÓN DEX 16 PARA NO AFECTAR LA ESTADÍSTICA
-    # ---------------------------------------------------------
-    if 'DEX All' in df_bodega.columns:
-        has_dex_16_bodega = df_bodega['DEX All'].astype(str).str.upper().str.contains(r'DEX\[16\]|DEX 16', regex=True, na=False)
-        df_corregir = df_bodega[~has_dex_16_bodega]
-    else:
-        df_corregir = df_bodega.copy()
-        
-    corregir_44_aplazar_total = len(df_corregir)
+    # Bultos fallando compromiso (Toda la carga estancada)
+    corregir_44_aplazar_total = len(df_bodega)
     
     if 'Commit Date' in df_vapa.columns:
         fechas_entrega_vapa = pd.to_datetime(df_vapa['Commit Date'], errors='coerce').dt.date
         filtro_compromiso_vapa = fechas_entrega_vapa.isna() | (fechas_entrega_vapa <= datetime.now().date())
-        df_compromiso = df_vapa[filtro_compromiso_vapa]
+        total_compromiso_hoy = len(df_vapa[filtro_compromiso_vapa])
     else:
-        df_compromiso = df_vapa.copy()
-
-    # Excluir DEX 16 de la base de estadística total
-    if 'DEX All' in df_compromiso.columns:
-        has_dex_16_tot = df_compromiso['DEX All'].astype(str).str.upper().str.contains(r'DEX\[16\]|DEX 16', regex=True, na=False)
-        df_compromiso = df_compromiso[~has_dex_16_tot]
-
-    total_compromiso_hoy = len(df_compromiso)
-    # ---------------------------------------------------------
-
-    # LÓGICA DE MASTER Y GUÍAS PARCIALES
-    master_col = None
-    for c in ['Master Tracking Number', 'Master Tracking', 'Master Tracking No', 'Guia Master', 'Form Bundle ID']:
-        if c in df_vapa.columns:
-            master_col = c
-            break
-            
-    df_parciales_estacion = pd.DataFrame()
-    parciales_masters_list = []
-    
-    if master_col:
-        df_con_master = df_vapa[df_vapa[master_col].notna() & (df_vapa[master_col].astype(str).str.strip() != "")]
-        if not df_con_master.empty:
-            grouped = df_con_master.groupby(master_col)
-            for m_id, group in grouped:
-                has_pieces_van = group['VAN All'].notna() & (group['VAN All'].astype(str).str.strip() != "")
-                pieces_in_route = group[has_pieces_van]
-                pieces_left_behind = group[~has_pieces_van]
-                
-                if len(pieces_in_route) > 0 and len(pieces_left_behind) > 0:
-                    parciales_masters_list.append(m_id)
-            
-            df_parciales_estacion = df_con_master[df_con_master[master_col].isin(parciales_masters_list) & (df_con_master['VAN All'].isna() | (df_con_master['VAN All'].astype(str).str.strip() == ""))]
-            
-    count_master_parciales = len(df_parciales_estacion)
+        total_compromiso_hoy = len(df_vapa)
 
     # --- CÁLCULO DE KPIs ---
     if total_compromiso_hoy > 0:
@@ -417,35 +376,33 @@ if st.session_state.history:
     else:
         pct_exito, pct_fallando = 0, 0
 
-    cols_to_check = ['Tracking Number', master_col if master_col else 'Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Commit Date', 'VAN All', 'DEX All', 'Fecha de Carga']
+    cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
-    # Eliminar duplicados en las columnas manteniendo el orden
-    cols_to_show = list(dict.fromkeys(cols_to_show))
 
     # --- KPIs PRINCIPALES ---
     st.markdown("### 📊 Indicadores de Rendimiento (Compromisos de Hoy)")
     col_kpi1, col_kpi2 = st.columns(2)
     with col_kpi1:
-        st.markdown(f'''
-            <div style="background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #00AA50; margin-bottom: 5px;">
-                <span style="color:#A0A0A0; font-size:12px; text-transform:uppercase;">Compromisos a Tiempo</span><br>
-                <span style="color:#FFFFFF; font-size:28px; font-weight:bold;">{pct_exito}%</span>
-                <div style="background-color:#2F2F2F; border-radius:5px; margin-top:5px; height:8px; width:100%;">
-                    <div style="background-color:#00AA50; border-radius:5px; height:8px; width:{pct_exito}%;"></div>
+        st.markdown(f"""
+            <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #00AA50; margin-bottom: 5px;'>
+                <span style='color:#A0A0A0; font-size:12px; text-transform:uppercase;'>Compromisos a Tiempo</span><br>
+                <span style='color:#FFFFFF; font-size:28px; font-weight:bold;'>{pct_exito}%</span>
+                <div style='background-color:#2F2F2F; border-radius:5px; margin-top:5px; height:8px; width:100%;'>
+                    <div style='background-color:#00AA50; border-radius:5px; height:8px; width:{pct_exito}%;'></div>
                 </div>
             </div>
-        ''', unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
         st.write("") 
     with col_kpi2:
-        st.markdown(f'''
-            <div style="background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #E63946; margin-bottom: 5px;">
-                <span style="color:#A0A0A0; font-size:12px; text-transform:uppercase;">Fallando Compromiso (Corregir Stat 44)</span><br>
-                <span style="color:#FFFFFF; font-size:28px; font-weight:bold;">{pct_fallando}%</span>
-                <div style="background-color:#2F2F2F; border-radius:5px; margin-top:5px; height:8px; width:100%;">
-                    <div style="background-color:#E63946; border-radius:5px; height:8px; width:{pct_fallando}%;"></div>
+        st.markdown(f"""
+            <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #E63946; margin-bottom: 5px;'>
+                <span style='color:#A0A0A0; font-size:12px; text-transform:uppercase;'>Fallando Compromiso (Corregir Stat 44)</span><br>
+                <span style='color:#FFFFFF; font-size:28px; font-weight:bold;'>{pct_fallando}%</span>
+                <div style='background-color:#2F2F2F; border-radius:5px; margin-top:5px; height:8px; width:100%;'>
+                    <div style='background-color:#E63946; border-radius:5px; height:8px; width:{pct_fallando}%;'></div>
                 </div>
             </div>
-        ''', unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
         
         if st.button("🔍 Ver Bultos que Afectan este %", use_container_width=True):
             st.session_state.ver_fallos_kpi = not st.session_state.ver_fallos_kpi
@@ -453,36 +410,12 @@ if st.session_state.history:
     if st.session_state.ver_fallos_kpi:
         st.error("🚨 Listado de bultos que deben ser Corregidos / Aplazados:")
         if corregir_44_aplazar_total > 0:
-            st.dataframe(df_corregir[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+            st.dataframe(df_bodega[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
         else:
             st.write("No hay registros que afecten el compromiso.")
 
     st.divider()
-
-    # SECCIÓN INTERACTIVA DE MASTER PARCIALES
-    if master_col and len(parciales_masters_list) > 0:
-        st.markdown("### 🧩 Módulo de Control: Despachos Parciales de Guía Master")
-        st.warning(f"⚠️ Se han detectado **{len(parciales_masters_list)} consolidaciones Master** en donde unas piezas subieron a la VAN y otras se quedaron huérfanas en estación.")
-        
-        selected_master = st.selectbox("📦 Selecciona un Master para comparar las piezas en ruta vs estación:", ["--- Seleccionar Master ---"] + list(parciales_masters_list))
-        
-        if selected_master != "--- Seleccionar Master ---":
-            df_m_selected = df_con_master[df_con_master[master_col] == selected_master]
-            
-            df_m_ruta = df_m_selected[df_m_selected['VAN All'].notna() & (df_m_selected['VAN All'].astype(str).str.strip() != "")]
-            df_m_estacion = df_m_selected[df_m_selected['VAN All'].isna() | (df_m_selected['VAN All'].astype(str).str.strip() == "")]
-            
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                st.success(f"✅ Piezas SÍ cargadas a VAN ({len(df_m_ruta)} bultos)")
-                st.dataframe(df_m_ruta[cols_to_show].hide(axis='index'), use_container_width=True)
-            with col_m2:
-                st.error(f"❌ Piezas HUÉRFANAS en estación ({len(df_m_estacion)} bultos)")
-                st.dataframe(df_m_estacion[cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-        st.divider()
-    elif master_col is None:
-        st.info("No se encontró columna 'Master Tracking Number' en el reporte para evaluar despachos parciales.")
-
+    
     st.markdown("### 📥 Volumen Diario y Clientes")
 
     if not df_vapa.empty:
@@ -535,26 +468,27 @@ if st.session_state.history:
 
     st.divider()
 
+    # --- LÓGICA DE TARJETAS DE EXCEPCIONES ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
     if 'STAT 44 Date Time Latest' in df_vapa.columns:
         filtro_44 = df_vapa['STAT 44 Date Time Latest'].notna() & (df_vapa['VAN All'].isna() | (df_vapa['VAN All'].astype(str).str.strip() == ""))
         if 'DEX All' in df_vapa.columns:
-            filtro_44 = filtro_44 & (~df_vapa['DEX All'].astype(str).str.contains(r'DEX\[17\]', na=False))
+            filtro_44 = filtro_44 & (~df_vapa['DEX All'].astype(str).str.contains('DEX\\[17\\]', na=False))
         df_44 = df_vapa[filtro_44]
     else:
         df_44 = pd.DataFrame()
         
     m_50, m_53, m_44 = len(df_50), len(df_53), len(df_44)
     
+    # Lista para ordenar dinámicamente las tarjetas de mayor a menor
     metricas_operativas = [
         {"nombre": "STAT 50", "cantidad": m_50, "df": df_50, "color": "#FF6600"},
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
         {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
-        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"},
-        {"nombre": "Master Parciales (Piezas Huérfanas)", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
+        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_bodega, "color": "#E63946"}
     ]
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
@@ -581,7 +515,7 @@ if st.session_state.history:
                         clientes_ordenados=clientes_ordenados,
                         corregir_total=corregir_44_aplazar_total, 
                         en_ruta=m_en_ruta,   
-                        df_criticos=df_corregir,
+                        df_criticos=df_bodega,
                         total_compromiso=total_compromiso_hoy
                     )
                     st.download_button(
@@ -592,8 +526,12 @@ if st.session_state.history:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
+        # Renderizado de Tarjetas Ordenadas
         cols_metricas = st.columns(len(metricas_ordenadas))
+        
         for i, col in enumerate(cols_metricas):
             m = metricas_ordenadas[i]
             with col:
@@ -604,6 +542,7 @@ if st.session_state.history:
                     else: 
                         st.write("Vacío")
 
+        # Gráfico dinámico basado en las métricas ordenadas
         chart_data = pd.DataFrame({
             "Categoría": [m["nombre"] for m in metricas_ordenadas],
             "Bultos": [m["cantidad"] for m in metricas_ordenadas],
