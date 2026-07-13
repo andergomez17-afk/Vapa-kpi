@@ -68,11 +68,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CAPA DE SEGURIDAD (LOGIN INTEGRADO EN CAJA)
+# 2. CAPA DE SEGURIDAD (LOGIN CON ROLES)
 # ==============================================================================
 def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
+        st.session_state["role"] = None
 
     if not st.session_state["password_correct"]:
         with st.form("login_form"):
@@ -88,12 +89,17 @@ def check_password():
                 </div>
             """, unsafe_allow_html=True)
             
-            pwd = st.text_input("Clave de Acceso", type="password", placeholder="Ingresa la credencial...")
+            pwd = st.text_input("Clave de Acceso", type="password", placeholder="Clave Operador o Admin...")
             submitted = st.form_submit_button("Iniciar Sesión")
             
             if submitted:
                 if pwd == "Vapa2026": 
                     st.session_state["password_correct"] = True
+                    st.session_state["role"] = "operador"
+                    st.rerun()
+                elif pwd == "AdminVapa2026": # NUEVA CLAVE ADMIN
+                    st.session_state["password_correct"] = True
+                    st.session_state["role"] = "admin"
                     st.rerun()
                 else:
                     st.error("❌ Credencial denegada. Verifica tu clave.")
@@ -109,11 +115,18 @@ if not check_password():
 col_titulo, col_salir = st.columns([7, 1])
 with col_titulo:
     st.markdown("<h1 style='margin-bottom: 0px;'>📦 Monitoreo de Almacén</h1>", unsafe_allow_html=True)
-    st.caption("Valparaíso Operations | Monitor de Excepciones y Base de Datos")
+    
+    # Identificador visual de Rol
+    if st.session_state.get("role") == "admin":
+        st.caption("🟢 Conectado como: **ADMINISTRADOR** | Valparaíso Operations")
+    else:
+        st.caption("🔵 Conectado como: **OPERADOR** | Valparaíso Operations")
+
 with col_salir:
     st.write("") 
     if st.button("🚪 Salir"):
         st.session_state["password_correct"] = False
+        st.session_state["role"] = None
         st.rerun()
 
 st.divider()
@@ -177,7 +190,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
     
-    # Encabezado Morado
     pdf.set_fill_color(77, 20, 140) 
     pdf.rect(0, 0, 210, 35, 'F')
     
@@ -202,7 +214,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
     pdf.line(10, 50, 200, 50)
     pdf.ln(5)
     
-    # KPIs sobre compromisos
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, txt="1. INDICADORES DE RENDIMIENTO (SOBRE COMPROMISOS VENCIDOS O DE HOY)", ln=True)
@@ -228,7 +239,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
     pdf.rect(90, pdf.get_y() + 2, int(pct_fallando), 4, 'F')
     pdf.ln(12)
 
-    # Resumen Volumétrico
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 10, txt="2. RESUMEN VOLUMETRICO DE BULTOS", ln=True)
@@ -258,7 +268,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             
     add_row("Corregir Stat 44 y Aplazar (Fallando Compromiso)", corregir_total, (255, 230, 230), (200, 0, 0))
     
-    # Anexo Tabla Roja
     def imprimir_cabecera_tabla_roja():
         pdf.set_fill_color(200, 0, 0)
         pdf.set_text_color(255, 255, 255)
@@ -310,10 +319,14 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             return f.read()
 
 # ==============================================================================
-# 5. BARRA LATERAL CON FORMULARIO ESTABLE
+# 5. BARRA LATERAL CON FORMULARIO ESTABLE Y ESTADOS
 # ==============================================================================
 st.sidebar.header("📥 Ingreso de Datos")
 st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
+
+# Inicializar Diccionario de Justificaciones Admin
+if "justificaciones_admin" not in st.session_state:
+    st.session_state.justificaciones_admin = {}
 
 if "history" not in st.session_state: 
     st.session_state.history = {}
@@ -334,6 +347,7 @@ if btn_procesar and uploaded_files:
 if st.session_state.history:
     if st.sidebar.button("🗑️ Limpiar Memoria (Reiniciar)"):
         st.session_state.history = {}
+        st.session_state.justificaciones_admin = {}
         st.rerun()
 
 # ==============================================================================
@@ -346,7 +360,10 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
-    # Inicializar variable para el botón de ver fallos
+    # Mapear justificaciones del Admin a la Base de Datos para Trazabilidad
+    df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', 'N/A'))
+    df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('ruta', ''))
+    
     if "ver_fallos_kpi" not in st.session_state:
         st.session_state.ver_fallos_kpi = False
         
@@ -360,26 +377,29 @@ if st.session_state.history:
     m_en_ruta = len(df_en_ruta)
     
     # -------------------------------------------------------------------------
-    # EXCLUSIÓN DE DEX 16 Y CÁLCULO DE BULTOS FALLANDO COMPROMISO REAL
+    # EXCLUSIÓN DE DEX 16 Y LÓGICA DE JUSTIFICACIONES ADMIN
     # -------------------------------------------------------------------------
-    # 1. Identificar bultos que ya tienen gestión válida
+    # 1. Bultos con gestión válida en sistema
     has_stat = pd.Series(False, index=df_bodega.index)
     for stat_col in ['STAT 44 Date Time Latest', 'STAT 50 Latest', 'STAT 53 All', 'STAT 37 Latest', 'STAT 27 Latest']:
         if stat_col in df_bodega.columns:
             has_stat = has_stat | df_bodega[stat_col].notna()
 
-    # 2. Identificar bultos con DEX excusados o en proceso (03, 07 y 16)
+    # 2. Exclusión de DEX excusados (03, 07 y 16)
     has_dex_excl = pd.Series(False, index=df_bodega.index)
     if 'DEX All' in df_bodega.columns:
         dex_col = df_bodega['DEX All'].astype(str).str.upper()
-        # Aquí filtramos estrictamente el DEX 16 para que no afecte
         has_dex_excl = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07|DEX\[16\]|DEX 16', regex=True, na=False)
         
-    # 3. La base real de bultos estancados (Sin Stat y Sin Dex excusado)
-    df_corregir = df_bodega[~has_stat & ~has_dex_excl]
+    # 3. Identificar bultos JUSTIFICADOS MANUALMENTE POR EL ADMIN que se deben PERDONAR del KPI
+    justificados_validos = [trk for trk, data in st.session_state.justificaciones_admin.items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
+    is_justified_admin = df_bodega['Tracking Number'].isin(justificados_validos)
+
+    # 4. Base Fallando Compromiso (Sin STAT, Sin DEX Excusado y NO justificados por Admin)
+    df_corregir = df_bodega[~has_stat & ~has_dex_excl & ~is_justified_admin]
     corregir_44_aplazar_total = len(df_corregir)
     
-    # 4. Cálculo del denominador (Total Compromisos) excluyendo el DEX 16 de la base
+    # 5. Cálculo del total de compromisos para el KPI
     if 'Commit Date' in df_vapa.columns:
         fechas_entrega_vapa = pd.to_datetime(df_vapa['Commit Date'], errors='coerce').dt.date
         filtro_compromiso_vapa = fechas_entrega_vapa.isna() | (fechas_entrega_vapa <= datetime.now().date())
@@ -401,8 +421,8 @@ if st.session_state.history:
     else:
         pct_exito, pct_fallando = 0, 0
 
-    cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
-    cols_to_show = [c for c in cols_to_check if c in df_vapa.columns]
+    cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Acción Admin', 'Ruta Asignada', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
+    cols_to_show = [c for c in cols_to_check if c in df_bodega.columns]
     cols_to_show = list(dict.fromkeys(cols_to_show))
 
     # --- KPIs PRINCIPALES ---
@@ -411,7 +431,7 @@ if st.session_state.history:
     with col_kpi1:
         st.markdown(f"""
             <div style='background-color:#1E1E1E; padding:15px; border-radius:10px; border-left:5px solid #00AA50; margin-bottom: 5px;'>
-                <span style='color:#A0A0A0; font-size:12px; text-transform:uppercase;'>Compromisos a Tiempo</span><br>
+                <span style='color:#A0A0A0; font-size:12px; text-transform:uppercase;'>Compromisos a Tiempo / Justificados</span><br>
                 <span style='color:#FFFFFF; font-size:28px; font-weight:bold;'>{pct_exito}%</span>
                 <div style='background-color:#2F2F2F; border-radius:5px; margin-top:5px; height:8px; width:100%;'>
                     <div style='background-color:#00AA50; border-radius:5px; height:8px; width:{pct_exito}%;'></div>
@@ -433,7 +453,6 @@ if st.session_state.history:
         if st.button("🔍 Ver Bultos que Afectan este %", use_container_width=True):
             st.session_state.ver_fallos_kpi = not st.session_state.ver_fallos_kpi
 
-    # MOSTRAR DETALLE MEJORADO SI SE HIZO CLIC
     if st.session_state.ver_fallos_kpi:
         st.markdown("""
             <div style='background-color:#4D148C; padding:10px; border-radius:5px; color:white; font-weight:bold; margin-bottom:10px; text-align:center;'>
@@ -512,14 +531,13 @@ if st.session_state.history:
     if 'STAT 44 Date Time Latest' in df_vapa.columns:
         filtro_44 = df_vapa['STAT 44 Date Time Latest'].notna() & (df_vapa['VAN All'].isna() | (df_vapa['VAN All'].astype(str).str.strip() == ""))
         if 'DEX All' in df_vapa.columns:
-            filtro_44 = filtro_44 & (~df_vapa['DEX All'].astype(str).str.contains('DEX\\[17\\]', na=False))
+            filtro_44 = filtro_44 & (~df_vapa['DEX All'].astype(str).str.contains(r'DEX\[17\]', na=False))
         df_44 = df_vapa[filtro_44]
     else:
         df_44 = pd.DataFrame()
         
     m_50, m_53, m_44 = len(df_50), len(df_53), len(df_44)
     
-    # Lista para ordenar dinámicamente las tarjetas de mayor a menor
     metricas_operativas = [
         {"nombre": "STAT 50", "cantidad": m_50, "df": df_50, "color": "#FF6600"},
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
@@ -530,7 +548,8 @@ if st.session_state.history:
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
     
-    tab1, tab2, tab3 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo"])
+    # ---------------- TABLERO CON 4 PESTAÑAS (INCLUYE ADMIN) ----------------
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin"])
     
     with tab1:
         st.markdown("### Resumen de Excepciones e Inventario")
@@ -563,12 +582,8 @@ if st.session_state.history:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
-        # Renderizado de Tarjetas Ordenadas
         cols_metricas = st.columns(len(metricas_ordenadas))
-        
         for i, col in enumerate(cols_metricas):
             m = metricas_ordenadas[i]
             with col:
@@ -579,7 +594,6 @@ if st.session_state.history:
                     else: 
                         st.write("Vacío")
 
-        # Gráfico dinámico basado en las métricas ordenadas
         chart_data = pd.DataFrame({
             "Categoría": [m["nombre"] for m in metricas_ordenadas],
             "Bultos": [m["cantidad"] for m in metricas_ordenadas],
@@ -627,6 +641,57 @@ if st.session_state.history:
             st.dataframe(pérdidas_df, use_container_width=True, hide_index=True)
         else:
             st.success("✅ La operación fluye correctamente. Ningún bulto muestra patrones de estancamiento prolongado.")
+
+    with tab4:
+        st.markdown("### 🛠️ Control de Justificaciones de Carga")
+        if st.session_state.get("role") != "admin":
+            st.error("🔒 ACCESO DENEGADO. Solo el equipo de Administración puede modificar el status de la carga estancada.")
+            st.info("Para acceder, debe cerrar sesión e ingresar con la credencial de Administrador.")
+        else:
+            st.markdown("Utiliza este módulo para auditar y justificar la carga sin pinchazos físicos. Las categorías **Sin Van**, **POD** y **Aplazada** eliminarán el bulto del % de fallo de manera automática.")
+            
+            c_f1, c_f2 = st.columns([1, 2])
+            
+            with c_f1:
+                st.markdown("#### Ingresar / Editar Justificación")
+                
+                # Obtener trackings que fallan el compromiso (antes de justificar)
+                df_fallando_base = df_bodega[~has_stat & ~has_dex_excl]
+                opciones_trk = df_fallando_base['Tracking Number'].dropna().unique().tolist()
+                
+                if not opciones_trk:
+                    st.success("No hay bultos pendientes de justificación en este reporte.")
+                
+                trk_seleccionado = st.selectbox("1. Selecciona el Tracking Number:", ["-- Buscar --"] + opciones_trk)
+                motivo = st.selectbox("2. Categoría Operativa:", ["Sin movimiento", "Sin Van", "POD", "Aplazada"])
+                
+                ruta_input = ""
+                if motivo == "Sin Van":
+                    ruta_input = st.text_input("3. Ingresar Número de Ruta (Ej. 101):", max_chars=3)
+                    
+                if st.button("💾 Guardar Justificación", use_container_width=True):
+                    if trk_seleccionado != "-- Buscar --":
+                        if motivo == "Sin Van" and len(ruta_input) != 3:
+                            st.warning("⚠️ Debes ingresar un código de ruta de 3 caracteres exactos.")
+                        else:
+                            st.session_state.justificaciones_admin[trk_seleccionado] = {"estado": motivo, "ruta": ruta_input}
+                            st.success("¡Guardado correctamente! El KPI se actualizará.")
+                            st.rerun()
+                    else:
+                        st.warning("Por favor selecciona un número de Tracking.")
+            
+            with c_f2:
+                st.markdown("#### Historial Activo de Carga Justificada")
+                if st.session_state.justificaciones_admin:
+                    datos_just = []
+                    for k, v in st.session_state.justificaciones_admin.items():
+                        estado = v["estado"]
+                        impacto = "❌ Afecta KPI" if estado == "Sin movimiento" else "✅ Justificado (Sano)"
+                        datos_just.append({"Tracking": k, "Motivo": estado, "Ruta Extra": v["ruta"], "Impacto KPI": impacto})
+                        
+                    st.dataframe(pd.DataFrame(datos_just), use_container_width=True, hide_index=True)
+                else:
+                    st.write("Aún no has ingresado justificaciones manuales en esta sesión.")
 
 else:
     st.info("👋 ¡Hola! Despliega el menú lateral y adjunta el archivo generado por DREUI para empezar.")
