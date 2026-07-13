@@ -184,7 +184,7 @@ def clean_pdf_text(text):
 # ==============================================================================
 # 4. GENERADOR DE PDF OPERATIVO AVANZADO
 # ==============================================================================
-def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso):
+def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, count_master_parciales, df_criticos, total_compromiso):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
@@ -266,6 +266,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             add_row(f"Ingreso Cliente {cli['nombre']}", cli['cantidad'], (245, 235, 255), (77, 20, 140))
             
     add_row("Corregir Stat 44 y Aplazar (Fallando Compromiso)", corregir_total, (255, 230, 230), (200, 0, 0))
+    add_row("Masters con Despacho Parcial (Piezas Quedadas)", count_master_parciales, (240, 240, 240), (0, 0, 0))
     
     def imprimir_cabecera_tabla_roja():
         pdf.set_fill_color(200, 0, 0)
@@ -358,7 +359,9 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
-    # Mapeo de justificaciones para trazabilidad, validando columnas primero
+    # -------------------------------------------------------------------------
+    # PROTECCIÓN ANTI-KEYERROR: Mapeo global de acciones Admin a TODAS las bases
+    # -------------------------------------------------------------------------
     if 'Tracking Number' in df_vapa.columns:
         df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', ''))
         df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('ruta', ''))
@@ -413,6 +416,27 @@ if st.session_state.history:
 
     total_compromiso_hoy = len(df_compromiso)
     # -------------------------------------------------------------------------
+
+    # LÓGICA DE MASTER Y GUÍAS PARCIALES
+    master_col = None
+    for c in ['Master Tracking Number', 'Master Tracking', 'Master Tracking No', 'Guia Master', 'Form Bundle ID']:
+        if c in df_vapa.columns:
+            master_col = c
+            break
+            
+    df_parciales_estacion = pd.DataFrame()
+    if master_col:
+        df_con_master = df_vapa[df_vapa[master_col].notna() & (df_vapa[master_col].astype(str).str.strip() != "")]
+        if not df_con_master.empty:
+            grouped = df_con_master.groupby(master_col)
+            parciales_masters_list = []
+            for m_id, group in grouped:
+                has_pieces_van = group['VAN All'].notna() & (group['VAN All'].astype(str).str.strip() != "")
+                if len(group[has_pieces_van]) > 0 and len(group[~has_pieces_van]) > 0:
+                    parciales_masters_list.append(m_id)
+            df_parciales_estacion = df_con_master[df_con_master[master_col].isin(parciales_masters_list) & (df_con_master['VAN All'].isna() | (df_con_master['VAN All'].astype(str).str.strip() == ""))]
+    
+    count_master_parciales = len(df_parciales_estacion)
 
     # --- CÁLCULO DE KPIs ---
     if total_compromiso_hoy > 0:
@@ -524,7 +548,6 @@ if st.session_state.history:
 
     st.divider()
 
-    # --- LÓGICA DE TARJETAS DE EXCEPCIONES Y MASTER PARCIALES ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
@@ -536,26 +559,6 @@ if st.session_state.history:
     else:
         df_44 = pd.DataFrame()
         
-    master_col = None
-    for c in ['Master Tracking Number', 'Master Tracking', 'Master Tracking No', 'Guia Master', 'Form Bundle ID']:
-        if c in df_vapa.columns:
-            master_col = c
-            break
-            
-    df_parciales_estacion = pd.DataFrame()
-    if master_col:
-        df_con_master = df_vapa[df_vapa[master_col].notna() & (df_vapa[master_col].astype(str).str.strip() != "")]
-        if not df_con_master.empty:
-            grouped = df_con_master.groupby(master_col)
-            parciales_masters_list = []
-            for m_id, group in grouped:
-                has_pieces_van = group['VAN All'].notna() & (group['VAN All'].astype(str).str.strip() != "")
-                if len(group[has_pieces_van]) > 0 and len(group[~has_pieces_van]) > 0:
-                    parciales_masters_list.append(m_id)
-            df_parciales_estacion = df_con_master[df_con_master[master_col].isin(parciales_masters_list) & (df_con_master['VAN All'].isna() | (df_con_master['VAN All'].astype(str).str.strip() == ""))]
-    
-    count_master_parciales = len(df_parciales_estacion)
-        
     m_50, m_53, m_44 = len(df_50), len(df_53), len(df_44)
     
     metricas_operativas = [
@@ -564,12 +567,11 @@ if st.session_state.history:
         {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
         {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"},
-        {"nombre": "Master Parciales (Huérfanas)", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
+        {"nombre": "Master Parciales", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
     ]
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
     
-    # ---------------- TABLERO CON 4 PESTAÑAS (INCLUYE ADMIN) ----------------
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin"])
     
     with tab1:
@@ -604,6 +606,8 @@ if st.session_state.history:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
         cols_metricas = st.columns(len(metricas_ordenadas))
         for i, col in enumerate(cols_metricas):
@@ -679,7 +683,6 @@ if st.session_state.history:
             with c_f1:
                 st.markdown("#### Ingresar / Editar Justificación")
                 
-                # Obtener trackings que fallan el compromiso (antes de justificar)
                 df_fallando_base = df_bodega[~has_stat & ~has_dex_excl]
                 opciones_trk = df_fallando_base['Tracking Number'].dropna().unique().tolist()
                 
