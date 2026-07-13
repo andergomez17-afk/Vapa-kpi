@@ -110,20 +110,12 @@ if not check_password():
     st.stop()
 
 # ==============================================================================
-# INICIALIZACIÓN DE MEMORIA ADMIN (ESTABILIZACIÓN)
-# ==============================================================================
-if "justificaciones_admin" not in st.session_state:
-    st.session_state["justificaciones_admin"] = {}
-
-if "history" not in st.session_state: 
-    st.session_state["history"] = {}
-
-# ==============================================================================
 # 3. CABECERA PRINCIPAL Y MOTOR
 # ==============================================================================
 col_titulo, col_salir = st.columns([7, 1])
 with col_titulo:
     st.markdown("<h1 style='margin-bottom: 0px;'>📦 Monitoreo de Almacén</h1>", unsafe_allow_html=True)
+    
     if st.session_state.get("role") == "admin":
         st.caption("🟢 Conectado como: **ADMINISTRADOR** | Valparaíso Operations")
     else:
@@ -138,8 +130,18 @@ with col_salir:
 
 st.divider()
 
+# ==============================================================================
+# INICIALIZACIÓN DE VARIABLES DE SESIÓN (ESTABILIZACIÓN)
+# ==============================================================================
+if "justificaciones_admin" not in st.session_state:
+    st.session_state["justificaciones_admin"] = {}
+
+if "history" not in st.session_state: 
+    st.session_state["history"] = {}
+
 class VapaEngine:
     @staticmethod
+    @st.cache_data(show_spinner=False)
     def process_file_data(df):
         hoy = datetime.now()
         df['Fecha de Carga'] = hoy.strftime('%Y-%m-%d')
@@ -156,16 +158,6 @@ class VapaEngine:
             fecha_actual = hoy.date()
             filtro_fecha = fechas_entrega.isna() | (fechas_entrega <= fecha_actual)
             df_bodega = df_bodega[filtro_fecha]
-            
-        # Inyección SEGURA de columnas Admin al momento de procesar
-        dict_admin = st.session_state.get("justificaciones_admin", {})
-        if 'Tracking Number' in df_vapa.columns:
-            df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('estado', 'N/A'))
-            df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('ruta', ''))
-        
-        if 'Tracking Number' in df_bodega.columns:
-            df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('estado', 'N/A'))
-            df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('ruta', ''))
         
         return df_vapa, df_bodega
 
@@ -199,8 +191,9 @@ def clean_pdf_text(text):
     return str(text).encode('latin-1', 'replace').decode('latin-1')
 
 # ==============================================================================
-# 4. GENERADOR DE PDF OPERATIVO AVANZADO
+# 4. GENERADOR DE PDF (CON CACHÉ PARA EVITAR COLAPSOS DE MEMORIA)
 # ==============================================================================
+@st.cache_data(show_spinner=False)
 def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
@@ -335,23 +328,24 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             return f.read()
 
 # ==============================================================================
-# 5. BARRA LATERAL CON FORMULARIO ESTABLE
+# 5. BARRA LATERAL ESTABILIZADA SIN FORMULARIO PARA EVITAR CORTES DE CONEXIÓN
 # ==============================================================================
 st.sidebar.header("📥 Ingreso de Datos")
 st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
 
-with st.sidebar.form("upload_form", clear_on_submit=False):
-    uploaded_files = st.file_uploader("", type=["xlsx"], accept_multiple_files=True)
-    btn_procesar = st.form_submit_button("⚙️ Procesar Archivos")
-
-if btn_procesar and uploaded_files:
-    for file in uploaded_files:
-        if file.name not in st.session_state["history"]:
-            with st.spinner(f"Procesando {file.name}..."):
-                df_vapa, df_bodega = VapaEngine.process_file(file)
-                if df_vapa is not None:
-                    st.session_state["history"][file.name] = {"vapa": df_vapa, "bodega": df_bodega}
-    st.sidebar.success("✅ Archivos procesados exitosamente.")
+# Al sacarlo del st.form, evitamos el bug de "Connecting..." en Streamlit con archivos grandes
+uploaded_files = st.sidebar.file_uploader("", type=["xlsx"], accept_multiple_files=True)
+if st.sidebar.button("⚙️ Procesar Archivos", use_container_width=True):
+    if uploaded_files:
+        for file in uploaded_files:
+            if file.name not in st.session_state["history"]:
+                with st.spinner(f"Procesando {file.name}..."):
+                    df_vapa, df_bodega = VapaEngine.process_file(file)
+                    if df_vapa is not None:
+                        st.session_state["history"][file.name] = {"vapa": df_vapa, "bodega": df_bodega}
+        st.sidebar.success("✅ Archivos procesados exitosamente.")
+    else:
+        st.sidebar.warning("Agrega un archivo primero.")
 
 if st.session_state["history"]:
     if st.sidebar.button("🗑️ Limpiar Memoria (Reiniciar)"):
@@ -366,9 +360,21 @@ if st.session_state["history"]:
     available_days = sorted(list(st.session_state["history"].keys()))
     selected_day = st.sidebar.selectbox("📅 Seleccionar Historial", available_days)
     
-    # Trabajamos con los dataframes inyectados desde VapaEngine
-    df_vapa = st.session_state["history"][selected_day]["vapa"]
-    df_bodega = st.session_state["history"][selected_day]["bodega"]
+    # -------------------------------------------------------------------------
+    # PROTECCIÓN ANTI-KEYERROR Y MUTACIONES DE CACHÉ (.copy() es vital)
+    # -------------------------------------------------------------------------
+    df_vapa = st.session_state["history"][selected_day]["vapa"].copy()
+    df_bodega = st.session_state["history"][selected_day]["bodega"].copy()
+    
+    just_dict = st.session_state.get("justificaciones_admin", {})
+    
+    if 'Tracking Number' in df_vapa.columns:
+        df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('estado', ''))
+        df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('ruta', ''))
+    
+    if 'Tracking Number' in df_bodega.columns:
+        df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('estado', ''))
+        df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('ruta', ''))
     
     if "ver_fallos_kpi" not in st.session_state:
         st.session_state.ver_fallos_kpi = False
@@ -395,7 +401,7 @@ if st.session_state["history"]:
         dex_col = df_bodega['DEX All'].astype(str).str.upper()
         has_dex_excl = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07|DEX\[16\]|DEX 16', regex=True, na=False)
         
-    justificados_validos = [trk for trk, data in st.session_state["justificaciones_admin"].items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
+    justificados_validos = [trk for trk, data in just_dict.items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
     is_justified_admin = pd.Series(False, index=df_bodega.index)
     if 'Tracking Number' in df_bodega.columns:
         is_justified_admin = df_bodega['Tracking Number'].isin(justificados_validos)
@@ -415,7 +421,6 @@ if st.session_state["history"]:
         df_compromiso = df_compromiso[~has_dex_16_tot]
 
     total_compromiso_hoy = len(df_compromiso)
-    # -------------------------------------------------------------------------
 
     # --- CÁLCULO DE KPIs ---
     if total_compromiso_hoy > 0:
@@ -425,8 +430,7 @@ if st.session_state["history"]:
         pct_exito, pct_fallando = 0, 0
 
     cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Acción Admin', 'Ruta Asignada', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
-    cols_to_show = [c for c in cols_to_check if c in df_vapa.columns or c in df_bodega.columns]
-    cols_to_show = list(dict.fromkeys(cols_to_show))
+    cols_to_show = list(dict.fromkeys(cols_to_check))
 
     # --- KPIs PRINCIPALES ---
     st.markdown("### 📊 Indicadores de Rendimiento (Compromisos de Hoy)")
@@ -542,7 +546,6 @@ if st.session_state["history"]:
         
     m_50, m_53, m_44 = len(df_50), len(df_53), len(df_44)
     
-    # Lista para ordenar dinámicamente las tarjetas de mayor a menor
     metricas_operativas = [
         {"nombre": "STAT 50", "cantidad": m_50, "df": df_50, "color": "#FF6600"},
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
@@ -553,7 +556,6 @@ if st.session_state["history"]:
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
     
-    # ---------------- TABLERO CON 4 PESTAÑAS (INCLUYE ADMIN) ----------------
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin"])
     
     with tab1:
@@ -587,8 +589,6 @@ if st.session_state["history"]:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
         cols_metricas = st.columns(len(metricas_ordenadas))
         for i, col in enumerate(cols_metricas):
@@ -682,18 +682,17 @@ if st.session_state["history"]:
                         if motivo == "Sin Van" and len(ruta_input) != 3:
                             st.warning("⚠️ Debes ingresar un código de ruta de 3 caracteres exactos.")
                         else:
-                            # Guardamos en la memoria y forzamos el recálculo
-                            st.session_state["justificaciones_admin"][trk_seleccionado] = {"estado": motivo, "ruta": ruta_input}
-                            st.success("¡Guardado correctamente! El KPI se ha actualizado.")
+                            st.session_state.justificaciones_admin[trk_seleccionado] = {"estado": motivo, "ruta": ruta_input}
+                            st.success("¡Guardado correctamente! El KPI se actualizará.")
                             st.rerun()
                     else:
                         st.warning("Por favor selecciona un número de Tracking.")
             
             with c_f2:
                 st.markdown("#### Historial Activo de Carga Justificada")
-                if st.session_state["justificaciones_admin"]:
+                if st.session_state.justificaciones_admin:
                     datos_just = []
-                    for k, v in st.session_state["justificaciones_admin"].items():
+                    for k, v in st.session_state.justificaciones_admin.items():
                         estado = v["estado"]
                         impacto = "❌ Afecta KPI" if estado == "Sin movimiento" else "✅ Justificado (Sano)"
                         datos_just.append({"Tracking": k, "Motivo": estado, "Ruta Extra": v["ruta"], "Impacto KPI": impacto})
