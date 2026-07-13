@@ -97,7 +97,7 @@ def check_password():
                     st.session_state["password_correct"] = True
                     st.session_state["role"] = "operador"
                     st.rerun()
-                elif pwd == "AdminVapa2026": # NUEVA CLAVE ADMIN
+                elif pwd == "AdminVapa2026": 
                     st.session_state["password_correct"] = True
                     st.session_state["role"] = "admin"
                     st.rerun()
@@ -116,7 +116,6 @@ col_titulo, col_salir = st.columns([7, 1])
 with col_titulo:
     st.markdown("<h1 style='margin-bottom: 0px;'>📦 Monitoreo de Almacén</h1>", unsafe_allow_html=True)
     
-    # Identificador visual de Rol
     if st.session_state.get("role") == "admin":
         st.caption("🟢 Conectado como: **ADMINISTRADOR** | Valparaíso Operations")
     else:
@@ -319,7 +318,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             return f.read()
 
 # ==============================================================================
-# 5. BARRA LATERAL CON FORMULARIO ESTABLE Y ESTADOS
+# 5. BARRA LATERAL CON FORMULARIO ESTABLE
 # ==============================================================================
 st.sidebar.header("📥 Ingreso de Datos")
 st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
@@ -360,8 +359,13 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
-    # Mapear justificaciones del Admin a la Base de Datos para Trazabilidad
-    df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', 'N/A'))
+    # -------------------------------------------------------------------------
+    # PROTECCIÓN ANTI-KEYERROR: Mapeo global de acciones Admin a TODAS las bases
+    # -------------------------------------------------------------------------
+    df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', ''))
+    df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('ruta', ''))
+    
+    df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', ''))
     df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('ruta', ''))
     
     if "ver_fallos_kpi" not in st.session_state:
@@ -379,27 +383,22 @@ if st.session_state.history:
     # -------------------------------------------------------------------------
     # EXCLUSIÓN DE DEX 16 Y LÓGICA DE JUSTIFICACIONES ADMIN
     # -------------------------------------------------------------------------
-    # 1. Bultos con gestión válida en sistema
     has_stat = pd.Series(False, index=df_bodega.index)
     for stat_col in ['STAT 44 Date Time Latest', 'STAT 50 Latest', 'STAT 53 All', 'STAT 37 Latest', 'STAT 27 Latest']:
         if stat_col in df_bodega.columns:
             has_stat = has_stat | df_bodega[stat_col].notna()
 
-    # 2. Exclusión de DEX excusados (03, 07 y 16)
     has_dex_excl = pd.Series(False, index=df_bodega.index)
     if 'DEX All' in df_bodega.columns:
         dex_col = df_bodega['DEX All'].astype(str).str.upper()
         has_dex_excl = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07|DEX\[16\]|DEX 16', regex=True, na=False)
         
-    # 3. Identificar bultos JUSTIFICADOS MANUALMENTE POR EL ADMIN que se deben PERDONAR del KPI
     justificados_validos = [trk for trk, data in st.session_state.justificaciones_admin.items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
     is_justified_admin = df_bodega['Tracking Number'].isin(justificados_validos)
 
-    # 4. Base Fallando Compromiso (Sin STAT, Sin DEX Excusado y NO justificados por Admin)
     df_corregir = df_bodega[~has_stat & ~has_dex_excl & ~is_justified_admin]
     corregir_44_aplazar_total = len(df_corregir)
     
-    # 5. Cálculo del total de compromisos para el KPI
     if 'Commit Date' in df_vapa.columns:
         fechas_entrega_vapa = pd.to_datetime(df_vapa['Commit Date'], errors='coerce').dt.date
         filtro_compromiso_vapa = fechas_entrega_vapa.isna() | (fechas_entrega_vapa <= datetime.now().date())
@@ -422,8 +421,8 @@ if st.session_state.history:
         pct_exito, pct_fallando = 0, 0
 
     cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Acción Admin', 'Ruta Asignada', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
-    cols_to_show = [c for c in cols_to_check if c in df_bodega.columns]
-    cols_to_show = list(dict.fromkeys(cols_to_show))
+    # Elimina posibles duplicados preservando el orden
+    cols_to_show = list(dict.fromkeys([c for c in cols_to_check if c in df_vapa.columns or c in df_bodega.columns]))
 
     # --- KPIs PRINCIPALES ---
     st.markdown("### 📊 Indicadores de Rendimiento (Compromisos de Hoy)")
@@ -461,8 +460,10 @@ if st.session_state.history:
         """, unsafe_allow_html=True)
         
         if corregir_44_aplazar_total > 0:
+            # Seleccionamos las columnas validadas de forma dinámica para evitar cualquier KeyError
+            cols_validas_fallos = [c for c in cols_to_show if c in df_corregir.columns]
             st.dataframe(
-                df_corregir[cols_to_show].style.apply(color_fedex_cliente, axis=1), 
+                df_corregir[cols_validas_fallos].style.apply(color_fedex_cliente, axis=1), 
                 use_container_width=True, 
                 hide_index=True, 
                 height=350
@@ -538,6 +539,7 @@ if st.session_state.history:
         
     m_50, m_53, m_44 = len(df_50), len(df_53), len(df_44)
     
+    # Lista para ordenar dinámicamente las tarjetas de mayor a menor
     metricas_operativas = [
         {"nombre": "STAT 50", "cantidad": m_50, "df": df_50, "color": "#FF6600"},
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
@@ -582,18 +584,24 @@ if st.session_state.history:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
+        # Renderizado de Tarjetas Ordenadas (A prueba de KeyError)
         cols_metricas = st.columns(len(metricas_ordenadas))
+        
         for i, col in enumerate(cols_metricas):
             m = metricas_ordenadas[i]
             with col:
                 st.markdown(f"<div class='metric-box' style='border-bottom-color:{m['color']};'><span class='metric-title'>{m['nombre']}</span><span class='metric-value' style='color:{m['color']};'>{m['cantidad']}</span></div>", unsafe_allow_html=True)
                 with st.expander("👁️ Ver"): 
                     if m['cantidad'] > 0: 
-                        st.dataframe(m['df'][cols_to_show].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                        cols_validas = [c for c in cols_to_show if c in m['df'].columns]
+                        st.dataframe(m['df'][cols_validas].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                     else: 
                         st.write("Vacío")
 
+        # Gráfico dinámico basado en las métricas ordenadas
         chart_data = pd.DataFrame({
             "Categoría": [m["nombre"] for m in metricas_ordenadas],
             "Bultos": [m["cantidad"] for m in metricas_ordenadas],
@@ -619,13 +627,14 @@ if st.session_state.history:
             st.write("")
             filtro_sip = st.toggle("Solo bultos SIP")
         
-        display_df = df_bodega[cols_to_show].copy()
+        display_df = df_bodega.copy()
         if filtro_sip:
             if 'status' in display_df.columns: display_df = display_df[display_df['status'].astype(str).str.upper() == 'SIP']
             elif 'Status' in display_df.columns: display_df = display_df[display_df['Status'].astype(str).str.upper() == 'SIP']
         if search_query: display_df = display_df[display_df['Tracking Number'].astype(str).str.contains(search_query)]
 
-        st.dataframe(display_df.style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True, height=500)
+        cols_validas_busqueda = [c for c in cols_to_show if c in display_df.columns]
+        st.dataframe(display_df[cols_validas_busqueda].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True, height=500)
 
     with tab3:
         st.markdown("### Control de Envejecimiento (≥ 3 días)")
