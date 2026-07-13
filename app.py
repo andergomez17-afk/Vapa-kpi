@@ -4,6 +4,8 @@ import numpy as np
 import plotly.express as px
 from datetime import datetime
 import tempfile
+import json
+import os
 
 # Intentar importar la librería para PDF
 try:
@@ -11,6 +13,24 @@ try:
     HAS_FPDF = True
 except ImportError:
     HAS_FPDF = False
+
+# ==============================================================================
+# 0. CONFIGURACIÓN DE LA BASE DE DATOS LOCAL (JSON)
+# ==============================================================================
+DB_FILE = "vapa_db.json"
+
+def load_db():
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_db(data):
+    with open(DB_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 # ==============================================================================
 # 1. CONFIGURACIÓN DE LA INTERFAZ Y ESTILOS FEDEX PREMIER
@@ -110,10 +130,10 @@ if not check_password():
     st.stop()
 
 # ==============================================================================
-# INICIALIZACIÓN DE MEMORIA ADMIN (ESTABILIZACIÓN)
+# INICIALIZACIÓN DE MEMORIA Y BASE DE DATOS
 # ==============================================================================
-if "justificaciones_admin" not in st.session_state:
-    st.session_state["justificaciones_admin"] = {}
+# Cargar la Base de Datos al iniciar
+st.session_state["justificaciones_admin"] = load_db()
 
 if "history" not in st.session_state: 
     st.session_state["history"] = {}
@@ -144,7 +164,7 @@ class VapaEngine:
         hoy = datetime.now()
         df['Fecha de Carga'] = hoy.strftime('%Y-%m-%d')
         
-        # LIMPIEZA DE TRACKING (Evita el problema del .0 de Excel)
+        # LIMPIEZA DE TRACKING (Evita el problema de decimales .0 de Excel)
         if 'Tracking Number' in df.columns:
             df['Tracking Number'] = df['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         
@@ -196,7 +216,7 @@ def clean_pdf_text(text):
 # 4. GENERADOR DE PDF (CON CACHÉ PARA EVITAR COLAPSOS DE MEMORIA)
 # ==============================================================================
 @st.cache_data(show_spinner=False)
-def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso):
+def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, count_master_parciales, df_criticos, total_compromiso):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
@@ -330,7 +350,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             return f.read()
 
 # ==============================================================================
-# 5. BARRA LATERAL ESTABILIZADA SIN FORMULARIO PARA EVITAR CORTES DE CONEXIÓN
+# 5. BARRA LATERAL ESTABILIZADA
 # ==============================================================================
 st.sidebar.header("📥 Ingreso de Datos")
 st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
@@ -349,9 +369,8 @@ if st.sidebar.button("⚙️ Procesar Archivos", use_container_width=True):
         st.sidebar.warning("Agrega un archivo primero.")
 
 if st.session_state["history"]:
-    if st.sidebar.button("🗑️ Limpiar Memoria (Reiniciar)"):
+    if st.sidebar.button("🗑️ Limpiar Historial de Archivos"):
         st.session_state["history"] = {}
-        st.session_state["justificaciones_admin"] = {}
         st.rerun()
 
 # ==============================================================================
@@ -365,17 +384,16 @@ if st.session_state["history"]:
     df_vapa = st.session_state["history"][selected_day]["vapa"].copy()
     df_bodega = st.session_state["history"][selected_day]["bodega"].copy()
     
+    # Leemos la Base de Datos Json actual
     just_dict = st.session_state.get("justificaciones_admin", {})
     
     if 'Tracking Number' in df_vapa.columns:
-        clean_trk_vapa = df_vapa['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        df_vapa['Acción Admin'] = clean_trk_vapa.map(lambda x: just_dict.get(x, {}).get('estado', ''))
-        df_vapa['Ruta Asignada'] = clean_trk_vapa.map(lambda x: just_dict.get(x, {}).get('ruta', ''))
+        df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('estado', ''))
+        df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('ruta', ''))
     
     if 'Tracking Number' in df_bodega.columns:
-        clean_trk_bodega = df_bodega['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-        df_bodega['Acción Admin'] = clean_trk_bodega.map(lambda x: just_dict.get(x, {}).get('estado', ''))
-        df_bodega['Ruta Asignada'] = clean_trk_bodega.map(lambda x: just_dict.get(x, {}).get('ruta', ''))
+        df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('estado', ''))
+        df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('ruta', ''))
     
     if "ver_fallos_kpi" not in st.session_state:
         st.session_state.ver_fallos_kpi = False
@@ -402,11 +420,11 @@ if st.session_state["history"]:
         dex_col = df_bodega['DEX All'].astype(str).str.upper()
         has_dex_excl = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07|DEX\[16\]|DEX 16', regex=True, na=False)
         
-    # Obtener listado de tracks que el admin ya marcó como "Perdonados"
+    # Obtener listado de tracks que el admin ya marcó como "Perdonados" (Leyendo desde el dict actualizado)
     justificados_validos = [str(trk).strip() for trk, data in just_dict.items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
     is_justified_admin = pd.Series(False, index=df_bodega.index)
     if 'Tracking Number' in df_bodega.columns:
-        is_justified_admin = clean_trk_bodega.isin(justificados_validos)
+        is_justified_admin = df_bodega['Tracking Number'].isin(justificados_validos)
 
     df_corregir = df_bodega[~has_stat & ~has_dex_excl & ~is_justified_admin]
     corregir_44_aplazar_total = len(df_corregir)
@@ -418,9 +436,15 @@ if st.session_state["history"]:
     else:
         df_compromiso = df_vapa.copy()
 
+    # Sacamos los DEX 16 de los compromisos
     if 'DEX All' in df_compromiso.columns:
         has_dex_16_tot = df_compromiso['DEX All'].astype(str).str.upper().str.contains(r'DEX\[16\]|DEX 16', regex=True, na=False)
         df_compromiso = df_compromiso[~has_dex_16_tot]
+
+    # Sacamos las Guías Justificadas Admin de los compromisos (Para que la matemática sea perfecta)
+    if 'Tracking Number' in df_compromiso.columns:
+        is_justified_tot = df_compromiso['Tracking Number'].isin(justificados_validos)
+        df_compromiso = df_compromiso[~is_justified_tot]
 
     total_compromiso_hoy = len(df_compromiso)
 
@@ -575,7 +599,7 @@ if st.session_state["history"]:
         {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
         {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"},
-        {"nombre": "Master Parciales (Huérfanas)", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
+        {"nombre": "Master Parciales", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
     ]
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
@@ -602,6 +626,7 @@ if st.session_state["history"]:
                         clientes_ordenados=clientes_ordenados,
                         corregir_total=corregir_44_aplazar_total, 
                         en_ruta=m_en_ruta,   
+                        count_master_parciales=count_master_parciales,
                         df_criticos=df_corregir,
                         total_compromiso=total_compromiso_hoy
                     )
@@ -678,23 +703,20 @@ if st.session_state["history"]:
             st.success("✅ La operación fluye correctamente. Ningún bulto muestra patrones de estancamiento prolongado.")
 
     with tab4:
-        st.markdown("### 🛠️ Control de Justificaciones Masivas")
+        st.markdown("### 🛠️ Control de Justificaciones Masivas (Con Base de Datos)")
         if st.session_state.get("role") != "admin":
             st.error("🔒 ACCESO DENEGADO. Solo el equipo de Administración puede modificar el status de la carga estancada.")
             st.info("Para acceder, debe cerrar sesión e ingresar con la credencial de Administrador.")
         else:
-            st.markdown("Utiliza este módulo para justificar múltiples guías a la vez. Al marcarlas como **Sin Van**, **POD** o **Aplazada**, se perdonarán y mejorará el KPI al instante.")
+            st.markdown("Utiliza este módulo para justificar múltiples guías a la vez. Al marcarlas como **Sin Van**, **POD** o **Aplazada**, se perdonarán y mejorará el KPI al instante. *Una vez justificadas, desaparecerán de la lista*.")
             
             c_f1, c_f2 = st.columns([1, 1])
             
             with c_f1:
                 st.markdown("#### Seleccionar Guías (Multiselección)")
                 
-                # Para la lista visual usamos SOLO los bultos que AÚN NO han sido justificados
-                todos_justificados = [str(k).strip() for k in st.session_state["justificaciones_admin"].keys()]
-                is_any_justified = clean_trk_bodega.isin(todos_justificados)
-                
-                df_fallando_base = df_bodega[~has_stat & ~has_dex_excl & ~is_any_justified].dropna(subset=['Tracking Number']).copy()
+                # Para la lista visual usamos SOLO los bultos que AÚN NO han sido justificados como perdonados
+                df_fallando_base = df_bodega[~has_stat & ~has_dex_excl & ~is_justified_admin].dropna(subset=['Tracking Number']).copy()
                 
                 if df_fallando_base.empty:
                     st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación.")
@@ -717,21 +739,26 @@ if st.session_state["history"]:
                     if motivo == "Sin Van":
                         ruta_input = st.text_input("3. Ingresar Número de Ruta (Ej. 101):", max_chars=3)
                         
-                    if st.button("💾 Guardar Justificación Masiva", use_container_width=True):
+                    if st.button("💾 Guardar en Base de Datos", use_container_width=True):
                         if trks_seleccionados:
                             if motivo == "Sin Van" and len(ruta_input) != 3:
                                 st.warning("⚠️ Debes ingresar un código de ruta de 3 caracteres exactos.")
                             else:
+                                # Guardar la selección múltiple en la Memoria y en el Disco
                                 for label in trks_seleccionados:
                                     trk_real = display_to_trk[label]
-                                    st.session_state.justificaciones_admin[trk_real] = {"estado": motivo, "ruta": ruta_input}
-                                st.success(f"¡{len(trks_seleccionados)} guías justificadas correctamente! El KPI se ha actualizado.")
+                                    st.session_state["justificaciones_admin"][trk_real] = {"estado": motivo, "ruta": ruta_input}
+                                
+                                # Anclar la información al disco duro
+                                save_db(st.session_state["justificaciones_admin"])
+                                
+                                st.success(f"¡{len(trks_seleccionados)} guías justificadas correctamente y guardadas en la base de datos! El KPI se ha actualizado.")
                                 st.rerun()
                         else:
                             st.warning("Por favor selecciona al menos una guía de la lista.")
             
             with c_f2:
-                st.markdown("#### Historial de Modificaciones")
+                st.markdown("#### Base de Datos: Historial Activo")
                 if st.session_state["justificaciones_admin"]:
                     datos_just = []
                     for k, v in st.session_state["justificaciones_admin"].items():
@@ -741,7 +768,7 @@ if st.session_state["history"]:
                         
                     st.dataframe(pd.DataFrame(datos_just), use_container_width=True, hide_index=True)
                 else:
-                    st.info("Aún no se han registrado justificaciones masivas en esta sesión operativa.")
+                    st.info("Aún no se han registrado justificaciones en la Base de Datos.")
 
 else:
     st.info("👋 ¡Hola! Despliega el menú lateral y adjunta el archivo generado por DREUI para empezar.")
