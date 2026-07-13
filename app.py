@@ -130,6 +130,15 @@ with col_salir:
 
 st.divider()
 
+# ==============================================================================
+# INICIALIZACIÓN DE VARIABLES DE SESIÓN (ESTABILIZACIÓN)
+# ==============================================================================
+if "justificaciones_admin" not in st.session_state:
+    st.session_state["justificaciones_admin"] = {}
+
+if "history" not in st.session_state: 
+    st.session_state["history"] = {}
+
 class VapaEngine:
     @staticmethod
     @st.cache_data(show_spinner=False)
@@ -184,7 +193,7 @@ def clean_pdf_text(text):
 # ==============================================================================
 # 4. GENERADOR DE PDF OPERATIVO AVANZADO
 # ==============================================================================
-def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, count_master_parciales, df_criticos, total_compromiso):
+def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
@@ -266,7 +275,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             add_row(f"Ingreso Cliente {cli['nombre']}", cli['cantidad'], (245, 235, 255), (77, 20, 140))
             
     add_row("Corregir Stat 44 y Aplazar (Fallando Compromiso)", corregir_total, (255, 230, 230), (200, 0, 0))
-    add_row("Masters con Despacho Parcial (Piezas Quedadas)", count_master_parciales, (240, 240, 240), (0, 0, 0))
     
     def imprimir_cabecera_tabla_roja():
         pdf.set_fill_color(200, 0, 0)
@@ -324,51 +332,48 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
 st.sidebar.header("📥 Ingreso de Datos")
 st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
 
-if "justificaciones_admin" not in st.session_state:
-    st.session_state.justificaciones_admin = {}
-
-if "history" not in st.session_state: 
-    st.session_state.history = {}
-
 with st.sidebar.form("upload_form", clear_on_submit=False):
     uploaded_files = st.file_uploader("", type=["xlsx"], accept_multiple_files=True)
     btn_procesar = st.form_submit_button("⚙️ Procesar Archivos")
 
 if btn_procesar and uploaded_files:
     for file in uploaded_files:
-        if file.name not in st.session_state.history:
+        if file.name not in st.session_state["history"]:
             with st.spinner(f"Procesando {file.name}..."):
                 df_vapa, df_bodega = VapaEngine.process_file(file)
                 if df_vapa is not None:
-                    st.session_state.history[file.name] = {"vapa": df_vapa, "bodega": df_bodega}
+                    st.session_state["history"][file.name] = {"vapa": df_vapa, "bodega": df_bodega}
     st.sidebar.success("✅ Archivos procesados exitosamente.")
 
-if st.session_state.history:
+if st.session_state["history"]:
     if st.sidebar.button("🗑️ Limpiar Memoria (Reiniciar)"):
-        st.session_state.history = {}
-        st.session_state.justificaciones_admin = {}
+        st.session_state["history"] = {}
+        st.session_state["justificaciones_admin"] = {}
         st.rerun()
 
 # ==============================================================================
 # 6. DASHBOARD INTERACTIVO
 # ==============================================================================
-if st.session_state.history:
-    available_days = sorted(list(st.session_state.history.keys()))
+if st.session_state["history"]:
+    available_days = sorted(list(st.session_state["history"].keys()))
     selected_day = st.sidebar.selectbox("📅 Seleccionar Historial", available_days)
     
-    df_vapa = st.session_state.history[selected_day]["vapa"]
-    df_bodega = st.session_state.history[selected_day]["bodega"]
+    # Trabajar con copias para no afectar la base maestra en memoria
+    df_vapa = st.session_state["history"][selected_day]["vapa"].copy()
+    df_bodega = st.session_state["history"][selected_day]["bodega"].copy()
     
     # -------------------------------------------------------------------------
-    # PROTECCIÓN ANTI-KEYERROR: Mapeo global de acciones Admin a TODAS las bases
+    # PROTECCIÓN ANTI-KEYERROR: Mapeo global de acciones Admin
     # -------------------------------------------------------------------------
+    just_dict = st.session_state.get("justificaciones_admin", {})
+    
     if 'Tracking Number' in df_vapa.columns:
-        df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', ''))
-        df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('ruta', ''))
+        df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('estado', ''))
+        df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('ruta', ''))
     
     if 'Tracking Number' in df_bodega.columns:
-        df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', ''))
-        df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('ruta', ''))
+        df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('estado', ''))
+        df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('ruta', ''))
     
     if "ver_fallos_kpi" not in st.session_state:
         st.session_state.ver_fallos_kpi = False
@@ -395,7 +400,7 @@ if st.session_state.history:
         dex_col = df_bodega['DEX All'].astype(str).str.upper()
         has_dex_excl = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07|DEX\[16\]|DEX 16', regex=True, na=False)
         
-    justificados_validos = [trk for trk, data in st.session_state.justificaciones_admin.items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
+    justificados_validos = [trk for trk, data in just_dict.items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
     is_justified_admin = pd.Series(False, index=df_bodega.index)
     if 'Tracking Number' in df_bodega.columns:
         is_justified_admin = df_bodega['Tracking Number'].isin(justificados_validos)
@@ -416,27 +421,6 @@ if st.session_state.history:
 
     total_compromiso_hoy = len(df_compromiso)
     # -------------------------------------------------------------------------
-
-    # LÓGICA DE MASTER Y GUÍAS PARCIALES
-    master_col = None
-    for c in ['Master Tracking Number', 'Master Tracking', 'Master Tracking No', 'Guia Master', 'Form Bundle ID']:
-        if c in df_vapa.columns:
-            master_col = c
-            break
-            
-    df_parciales_estacion = pd.DataFrame()
-    if master_col:
-        df_con_master = df_vapa[df_vapa[master_col].notna() & (df_vapa[master_col].astype(str).str.strip() != "")]
-        if not df_con_master.empty:
-            grouped = df_con_master.groupby(master_col)
-            parciales_masters_list = []
-            for m_id, group in grouped:
-                has_pieces_van = group['VAN All'].notna() & (group['VAN All'].astype(str).str.strip() != "")
-                if len(group[has_pieces_van]) > 0 and len(group[~has_pieces_van]) > 0:
-                    parciales_masters_list.append(m_id)
-            df_parciales_estacion = df_con_master[df_con_master[master_col].isin(parciales_masters_list) & (df_con_master['VAN All'].isna() | (df_con_master['VAN All'].astype(str).str.strip() == ""))]
-    
-    count_master_parciales = len(df_parciales_estacion)
 
     # --- CÁLCULO DE KPIs ---
     if total_compromiso_hoy > 0:
@@ -548,6 +532,7 @@ if st.session_state.history:
 
     st.divider()
 
+    # --- LÓGICA DE TARJETAS DE EXCEPCIONES ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
@@ -566,12 +551,12 @@ if st.session_state.history:
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
         {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
-        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"},
-        {"nombre": "Master Parciales", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
+        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"}
     ]
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
     
+    # ---------------- TABLERO CON 4 PESTAÑAS (INCLUYE ADMIN) ----------------
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin"])
     
     with tab1:
@@ -594,7 +579,6 @@ if st.session_state.history:
                         clientes_ordenados=clientes_ordenados,
                         corregir_total=corregir_44_aplazar_total, 
                         en_ruta=m_en_ruta,   
-                        count_master_parciales=count_master_parciales,
                         df_criticos=df_corregir,
                         total_compromiso=total_compromiso_hoy
                     )
