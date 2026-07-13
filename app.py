@@ -110,12 +110,20 @@ if not check_password():
     st.stop()
 
 # ==============================================================================
+# INICIALIZACIÓN DE MEMORIA ADMIN (ESTABILIZACIÓN)
+# ==============================================================================
+if "justificaciones_admin" not in st.session_state:
+    st.session_state["justificaciones_admin"] = {}
+
+if "history" not in st.session_state: 
+    st.session_state["history"] = {}
+
+# ==============================================================================
 # 3. CABECERA PRINCIPAL Y MOTOR
 # ==============================================================================
 col_titulo, col_salir = st.columns([7, 1])
 with col_titulo:
     st.markdown("<h1 style='margin-bottom: 0px;'>📦 Monitoreo de Almacén</h1>", unsafe_allow_html=True)
-    
     if st.session_state.get("role") == "admin":
         st.caption("🟢 Conectado como: **ADMINISTRADOR** | Valparaíso Operations")
     else:
@@ -130,18 +138,8 @@ with col_salir:
 
 st.divider()
 
-# ==============================================================================
-# INICIALIZACIÓN DE VARIABLES DE SESIÓN (ESTABILIZACIÓN)
-# ==============================================================================
-if "justificaciones_admin" not in st.session_state:
-    st.session_state["justificaciones_admin"] = {}
-
-if "history" not in st.session_state: 
-    st.session_state["history"] = {}
-
 class VapaEngine:
     @staticmethod
-    @st.cache_data(show_spinner=False)
     def process_file_data(df):
         hoy = datetime.now()
         df['Fecha de Carga'] = hoy.strftime('%Y-%m-%d')
@@ -158,6 +156,16 @@ class VapaEngine:
             fecha_actual = hoy.date()
             filtro_fecha = fechas_entrega.isna() | (fechas_entrega <= fecha_actual)
             df_bodega = df_bodega[filtro_fecha]
+            
+        # Inyección SEGURA de columnas Admin al momento de procesar
+        dict_admin = st.session_state.get("justificaciones_admin", {})
+        if 'Tracking Number' in df_vapa.columns:
+            df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('estado', 'N/A'))
+            df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('ruta', ''))
+        
+        if 'Tracking Number' in df_bodega.columns:
+            df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('estado', 'N/A'))
+            df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('ruta', ''))
         
         return df_vapa, df_bodega
 
@@ -333,7 +341,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
 st.sidebar.header("📥 Ingreso de Datos")
 st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
 
-# Al sacarlo del st.form, evitamos el bug de "Connecting..." en Streamlit con archivos grandes
 uploaded_files = st.sidebar.file_uploader("", type=["xlsx"], accept_multiple_files=True)
 if st.sidebar.button("⚙️ Procesar Archivos", use_container_width=True):
     if uploaded_files:
@@ -360,9 +367,7 @@ if st.session_state["history"]:
     available_days = sorted(list(st.session_state["history"].keys()))
     selected_day = st.sidebar.selectbox("📅 Seleccionar Historial", available_days)
     
-    # -------------------------------------------------------------------------
-    # PROTECCIÓN ANTI-KEYERROR Y MUTACIONES DE CACHÉ (.copy() es vital)
-    # -------------------------------------------------------------------------
+    # Trabajamos con copias protegidas
     df_vapa = st.session_state["history"][selected_day]["vapa"].copy()
     df_bodega = st.session_state["history"][selected_day]["bodega"].copy()
     
@@ -421,6 +426,27 @@ if st.session_state["history"]:
         df_compromiso = df_compromiso[~has_dex_16_tot]
 
     total_compromiso_hoy = len(df_compromiso)
+
+    # LÓGICA DE MASTER Y GUÍAS PARCIALES
+    master_col = None
+    for c in ['Master Tracking Number', 'Master Tracking', 'Master Tracking No', 'Guia Master', 'Form Bundle ID']:
+        if c in df_vapa.columns:
+            master_col = c
+            break
+            
+    df_parciales_estacion = pd.DataFrame()
+    if master_col:
+        df_con_master = df_vapa[df_vapa[master_col].notna() & (df_vapa[master_col].astype(str).str.strip() != "")]
+        if not df_con_master.empty:
+            grouped = df_con_master.groupby(master_col)
+            parciales_masters_list = []
+            for m_id, group in grouped:
+                has_pieces_van = group['VAN All'].notna() & (group['VAN All'].astype(str).str.strip() != "")
+                if len(group[has_pieces_van]) > 0 and len(group[~has_pieces_van]) > 0:
+                    parciales_masters_list.append(m_id)
+            df_parciales_estacion = df_con_master[df_con_master[master_col].isin(parciales_masters_list) & (df_con_master['VAN All'].isna() | (df_con_master['VAN All'].astype(str).str.strip() == ""))]
+    
+    count_master_parciales = len(df_parciales_estacion)
 
     # --- CÁLCULO DE KPIs ---
     if total_compromiso_hoy > 0:
@@ -551,11 +577,13 @@ if st.session_state["history"]:
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
         {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
-        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"}
+        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"},
+        {"nombre": "Master Parciales", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
     ]
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
     
+    # ---------------- TABLERO CON 4 PESTAÑAS (INCLUYE ADMIN) ----------------
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin"])
     
     with tab1:
@@ -589,6 +617,8 @@ if st.session_state["history"]:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
         cols_metricas = st.columns(len(metricas_ordenadas))
         for i, col in enumerate(cols_metricas):
@@ -652,54 +682,73 @@ if st.session_state["history"]:
             st.success("✅ La operación fluye correctamente. Ningún bulto muestra patrones de estancamiento prolongado.")
 
     with tab4:
-        st.markdown("### 🛠️ Control de Justificaciones de Carga")
+        st.markdown("### 🛠️ Control de Justificaciones Masivas")
         if st.session_state.get("role") != "admin":
             st.error("🔒 ACCESO DENEGADO. Solo el equipo de Administración puede modificar el status de la carga estancada.")
             st.info("Para acceder, debe cerrar sesión e ingresar con la credencial de Administrador.")
         else:
-            st.markdown("Utiliza este módulo para auditar y justificar la carga sin pinchazos físicos. Las categorías **Sin Van**, **POD** y **Aplazada** eliminarán el bulto del % de fallo de manera automática.")
+            st.markdown("Utiliza este módulo para justificar múltiples guías a la vez. Al marcarlas como **Sin Van**, **POD** o **Aplazada**, se perdonarán y mejorará el KPI al instante.")
             
-            c_f1, c_f2 = st.columns([1, 2])
+            c_f1, c_f2 = st.columns([1, 1])
             
             with c_f1:
-                st.markdown("#### Ingresar / Editar Justificación")
+                st.markdown("#### Seleccionar Guías (Multiselección)")
                 
-                df_fallando_base = df_bodega[~has_stat & ~has_dex_excl]
-                opciones_trk = df_fallando_base['Tracking Number'].dropna().unique().tolist()
+                # Obtener la base que está fallando actualmente
+                df_fallando_base = df_bodega[~has_stat & ~has_dex_excl].dropna(subset=['Tracking Number']).copy()
                 
-                if not opciones_trk:
-                    st.success("No hay bultos pendientes de justificación en este reporte.")
-                
-                trk_seleccionado = st.selectbox("1. Selecciona el Tracking Number:", ["-- Buscar --"] + opciones_trk)
-                motivo = st.selectbox("2. Categoría Operativa:", ["Sin movimiento", "Sin Van", "POD", "Aplazada"])
-                
-                ruta_input = ""
-                if motivo == "Sin Van":
-                    ruta_input = st.text_input("3. Ingresar Número de Ruta (Ej. 101):", max_chars=3)
+                if df_fallando_base.empty:
+                    st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación.")
+                else:
+                    # Crear el diccionario de Etiquetas visuales -> Tracking Real
+                    display_to_trk = {}
+                    for _, row in df_fallando_base.iterrows():
+                        trk = str(row.get('Tracking Number', 'S/N'))
+                        if trk not in display_to_trk.values():
+                            cliente = str(row.get('Shipper Company', row.get('Shipper Name', 'Desc.')))
+                            direccion = str(row.get('CE Recp Address All', 'Desc.'))
+                            # Etiqueta limpia: Tracking ➔ Cliente | Dirección
+                            label = f"{trk} ➔ {cliente[:15]} | {direccion[:25]}"
+                            display_to_trk[label] = trk
                     
-                if st.button("💾 Guardar Justificación", use_container_width=True):
-                    if trk_seleccionado != "-- Buscar --":
-                        if motivo == "Sin Van" and len(ruta_input) != 3:
-                            st.warning("⚠️ Debes ingresar un código de ruta de 3 caracteres exactos.")
+                    opciones_label = list(display_to_trk.keys())
+                    
+                    # El nuevo MULTI-SELECT donde puedes ver nombre y dirección
+                    trks_seleccionados = st.multiselect("1. Selecciona o busca las Guías a justificar:", opciones_label, placeholder="Elige una o más guías...")
+                    
+                    motivo = st.selectbox("2. Categoría Operativa:", ["Sin movimiento", "Sin Van", "POD", "Aplazada"])
+                    
+                    ruta_input = ""
+                    if motivo == "Sin Van":
+                        ruta_input = st.text_input("3. Ingresar Número de Ruta (Ej. 101):", max_chars=3)
+                        
+                    if st.button("💾 Guardar Justificación Masiva", use_container_width=True):
+                        if trks_seleccionados:
+                            if motivo == "Sin Van" and len(ruta_input) != 3:
+                                st.warning("⚠️ Debes ingresar un código de ruta de 3 caracteres exactos.")
+                            else:
+                                # Guardar la selección múltiple en la memoria
+                                for label in trks_seleccionados:
+                                    trk_real = display_to_trk[label]
+                                    st.session_state.justificaciones_admin[trk_real] = {"estado": motivo, "ruta": ruta_input}
+                                
+                                st.success(f"¡{len(trks_seleccionados)} guías justificadas correctamente! El KPI se ha actualizado.")
+                                st.rerun()
                         else:
-                            st.session_state.justificaciones_admin[trk_seleccionado] = {"estado": motivo, "ruta": ruta_input}
-                            st.success("¡Guardado correctamente! El KPI se actualizará.")
-                            st.rerun()
-                    else:
-                        st.warning("Por favor selecciona un número de Tracking.")
+                            st.warning("Por favor selecciona al menos una guía de la lista.")
             
             with c_f2:
-                st.markdown("#### Historial Activo de Carga Justificada")
+                st.markdown("#### Historial de Modificaciones")
                 if st.session_state.justificaciones_admin:
                     datos_just = []
                     for k, v in st.session_state.justificaciones_admin.items():
                         estado = v["estado"]
-                        impacto = "❌ Afecta KPI" if estado == "Sin movimiento" else "✅ Justificado (Sano)"
-                        datos_just.append({"Tracking": k, "Motivo": estado, "Ruta Extra": v["ruta"], "Impacto KPI": impacto})
+                        impacto = "❌ Sigue en Fallo" if estado == "Sin movimiento" else "✅ Perdonado del KPI"
+                        datos_just.append({"Tracking Justificado": k, "Categoría Asignada": estado, "Ruta": v["ruta"], "Impacto en Métrica": impacto})
                         
                     st.dataframe(pd.DataFrame(datos_just), use_container_width=True, hide_index=True)
                 else:
-                    st.write("Aún no has ingresado justificaciones manuales en esta sesión.")
+                    st.info("Aún no se han registrado justificaciones masivas en esta sesión operativa.")
 
 else:
     st.info("👋 ¡Hola! Despliega el menú lateral y adjunta el archivo generado por DREUI para empezar.")
