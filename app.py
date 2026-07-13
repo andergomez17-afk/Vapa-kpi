@@ -323,7 +323,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
 st.sidebar.header("📥 Ingreso de Datos")
 st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
 
-# Inicializar Diccionario de Justificaciones Admin
 if "justificaciones_admin" not in st.session_state:
     st.session_state.justificaciones_admin = {}
 
@@ -359,14 +358,14 @@ if st.session_state.history:
     df_vapa = st.session_state.history[selected_day]["vapa"]
     df_bodega = st.session_state.history[selected_day]["bodega"]
     
-    # -------------------------------------------------------------------------
-    # PROTECCIÓN ANTI-KEYERROR: Mapeo global de acciones Admin a TODAS las bases
-    # -------------------------------------------------------------------------
-    df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', ''))
-    df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('ruta', ''))
+    # Mapeo de justificaciones para trazabilidad, validando columnas primero
+    if 'Tracking Number' in df_vapa.columns:
+        df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', ''))
+        df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('ruta', ''))
     
-    df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', ''))
-    df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('ruta', ''))
+    if 'Tracking Number' in df_bodega.columns:
+        df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('estado', ''))
+        df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: st.session_state.justificaciones_admin.get(x, {}).get('ruta', ''))
     
     if "ver_fallos_kpi" not in st.session_state:
         st.session_state.ver_fallos_kpi = False
@@ -394,7 +393,9 @@ if st.session_state.history:
         has_dex_excl = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07|DEX\[16\]|DEX 16', regex=True, na=False)
         
     justificados_validos = [trk for trk, data in st.session_state.justificaciones_admin.items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
-    is_justified_admin = df_bodega['Tracking Number'].isin(justificados_validos)
+    is_justified_admin = pd.Series(False, index=df_bodega.index)
+    if 'Tracking Number' in df_bodega.columns:
+        is_justified_admin = df_bodega['Tracking Number'].isin(justificados_validos)
 
     df_corregir = df_bodega[~has_stat & ~has_dex_excl & ~is_justified_admin]
     corregir_44_aplazar_total = len(df_corregir)
@@ -421,8 +422,7 @@ if st.session_state.history:
         pct_exito, pct_fallando = 0, 0
 
     cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Acción Admin', 'Ruta Asignada', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
-    # Elimina posibles duplicados preservando el orden
-    cols_to_show = list(dict.fromkeys([c for c in cols_to_check if c in df_vapa.columns or c in df_bodega.columns]))
+    cols_to_show = list(dict.fromkeys(cols_to_check))
 
     # --- KPIs PRINCIPALES ---
     st.markdown("### 📊 Indicadores de Rendimiento (Compromisos de Hoy)")
@@ -460,7 +460,6 @@ if st.session_state.history:
         """, unsafe_allow_html=True)
         
         if corregir_44_aplazar_total > 0:
-            # Seleccionamos las columnas validadas de forma dinámica para evitar cualquier KeyError
             cols_validas_fallos = [c for c in cols_to_show if c in df_corregir.columns]
             st.dataframe(
                 df_corregir[cols_validas_fallos].style.apply(color_fedex_cliente, axis=1), 
@@ -525,7 +524,7 @@ if st.session_state.history:
 
     st.divider()
 
-    # --- LÓGICA DE TARJETAS DE EXCEPCIONES ---
+    # --- LÓGICA DE TARJETAS DE EXCEPCIONES Y MASTER PARCIALES ---
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
@@ -537,15 +536,35 @@ if st.session_state.history:
     else:
         df_44 = pd.DataFrame()
         
+    master_col = None
+    for c in ['Master Tracking Number', 'Master Tracking', 'Master Tracking No', 'Guia Master', 'Form Bundle ID']:
+        if c in df_vapa.columns:
+            master_col = c
+            break
+            
+    df_parciales_estacion = pd.DataFrame()
+    if master_col:
+        df_con_master = df_vapa[df_vapa[master_col].notna() & (df_vapa[master_col].astype(str).str.strip() != "")]
+        if not df_con_master.empty:
+            grouped = df_con_master.groupby(master_col)
+            parciales_masters_list = []
+            for m_id, group in grouped:
+                has_pieces_van = group['VAN All'].notna() & (group['VAN All'].astype(str).str.strip() != "")
+                if len(group[has_pieces_van]) > 0 and len(group[~has_pieces_van]) > 0:
+                    parciales_masters_list.append(m_id)
+            df_parciales_estacion = df_con_master[df_con_master[master_col].isin(parciales_masters_list) & (df_con_master['VAN All'].isna() | (df_con_master['VAN All'].astype(str).str.strip() == ""))]
+    
+    count_master_parciales = len(df_parciales_estacion)
+        
     m_50, m_53, m_44 = len(df_50), len(df_53), len(df_44)
     
-    # Lista para ordenar dinámicamente las tarjetas de mayor a menor
     metricas_operativas = [
         {"nombre": "STAT 50", "cantidad": m_50, "df": df_50, "color": "#FF6600"},
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
         {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
-        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"}
+        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"},
+        {"nombre": "Master Parciales (Huérfanas)", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
     ]
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
@@ -573,6 +592,7 @@ if st.session_state.history:
                         clientes_ordenados=clientes_ordenados,
                         corregir_total=corregir_44_aplazar_total, 
                         en_ruta=m_en_ruta,   
+                        count_master_parciales=count_master_parciales,
                         df_criticos=df_corregir,
                         total_compromiso=total_compromiso_hoy
                     )
@@ -584,12 +604,8 @@ if st.session_state.history:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
-        # Renderizado de Tarjetas Ordenadas (A prueba de KeyError)
         cols_metricas = st.columns(len(metricas_ordenadas))
-        
         for i, col in enumerate(cols_metricas):
             m = metricas_ordenadas[i]
             with col:
@@ -601,7 +617,6 @@ if st.session_state.history:
                     else: 
                         st.write("Vacío")
 
-        # Gráfico dinámico basado en las métricas ordenadas
         chart_data = pd.DataFrame({
             "Categoría": [m["nombre"] for m in metricas_ordenadas],
             "Bultos": [m["cantidad"] for m in metricas_ordenadas],
