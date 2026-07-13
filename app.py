@@ -144,6 +144,10 @@ class VapaEngine:
         hoy = datetime.now()
         df['Fecha de Carga'] = hoy.strftime('%Y-%m-%d')
         
+        # LIMPIEZA DE TRACKING (Evita el problema del .0 de Excel)
+        if 'Tracking Number' in df.columns:
+            df['Tracking Number'] = df['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        
         df_vapa = df[df['Dest Loc Cd'].astype(str).str.strip().str.upper() == 'VAPA'].copy()
         
         df_bodega = df_vapa[
@@ -157,16 +161,6 @@ class VapaEngine:
             filtro_fecha = fechas_entrega.isna() | (fechas_entrega <= fecha_actual)
             df_bodega = df_bodega[filtro_fecha]
             
-        # Inyección SEGURA de columnas Admin al momento de procesar
-        dict_admin = st.session_state.get("justificaciones_admin", {})
-        if 'Tracking Number' in df_vapa.columns:
-            df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('estado', 'N/A'))
-            df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('ruta', ''))
-        
-        if 'Tracking Number' in df_bodega.columns:
-            df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('estado', 'N/A'))
-            df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('ruta', ''))
-        
         return df_vapa, df_bodega
 
     @staticmethod
@@ -374,12 +368,14 @@ if st.session_state["history"]:
     just_dict = st.session_state.get("justificaciones_admin", {})
     
     if 'Tracking Number' in df_vapa.columns:
-        df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('estado', ''))
-        df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('ruta', ''))
+        clean_trk_vapa = df_vapa['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        df_vapa['Acción Admin'] = clean_trk_vapa.map(lambda x: just_dict.get(x, {}).get('estado', ''))
+        df_vapa['Ruta Asignada'] = clean_trk_vapa.map(lambda x: just_dict.get(x, {}).get('ruta', ''))
     
     if 'Tracking Number' in df_bodega.columns:
-        df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('estado', ''))
-        df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: just_dict.get(x, {}).get('ruta', ''))
+        clean_trk_bodega = df_bodega['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+        df_bodega['Acción Admin'] = clean_trk_bodega.map(lambda x: just_dict.get(x, {}).get('estado', ''))
+        df_bodega['Ruta Asignada'] = clean_trk_bodega.map(lambda x: just_dict.get(x, {}).get('ruta', ''))
     
     if "ver_fallos_kpi" not in st.session_state:
         st.session_state.ver_fallos_kpi = False
@@ -394,7 +390,7 @@ if st.session_state["history"]:
     m_en_ruta = len(df_en_ruta)
     
     # -------------------------------------------------------------------------
-    # EXCLUSIÓN DE DEX 16 Y LÓGICA DE JUSTIFICACIONES ADMIN
+    # EXCLUSIÓN DE DEX 16 Y LÓGICA DE JUSTIFICACIONES ADMIN PERFECTA
     # -------------------------------------------------------------------------
     has_stat = pd.Series(False, index=df_bodega.index)
     for stat_col in ['STAT 44 Date Time Latest', 'STAT 50 Latest', 'STAT 53 All', 'STAT 37 Latest', 'STAT 27 Latest']:
@@ -406,10 +402,11 @@ if st.session_state["history"]:
         dex_col = df_bodega['DEX All'].astype(str).str.upper()
         has_dex_excl = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07|DEX\[16\]|DEX 16', regex=True, na=False)
         
-    justificados_validos = [trk for trk, data in just_dict.items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
+    # Obtener listado de tracks que el admin ya marcó como "Perdonados"
+    justificados_validos = [str(trk).strip() for trk, data in just_dict.items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
     is_justified_admin = pd.Series(False, index=df_bodega.index)
     if 'Tracking Number' in df_bodega.columns:
-        is_justified_admin = df_bodega['Tracking Number'].isin(justificados_validos)
+        is_justified_admin = clean_trk_bodega.isin(justificados_validos)
 
     df_corregir = df_bodega[~has_stat & ~has_dex_excl & ~is_justified_admin]
     corregir_44_aplazar_total = len(df_corregir)
@@ -578,12 +575,11 @@ if st.session_state["history"]:
         {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
         {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"},
-        {"nombre": "Master Parciales", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
+        {"nombre": "Master Parciales (Huérfanas)", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
     ]
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
     
-    # ---------------- TABLERO CON 4 PESTAÑAS (INCLUYE ADMIN) ----------------
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin"])
     
     with tab1:
@@ -694,28 +690,27 @@ if st.session_state["history"]:
             with c_f1:
                 st.markdown("#### Seleccionar Guías (Multiselección)")
                 
-                # Obtener la base que está fallando actualmente
-                df_fallando_base = df_bodega[~has_stat & ~has_dex_excl].dropna(subset=['Tracking Number']).copy()
+                # Para la lista visual usamos SOLO los bultos que AÚN NO han sido justificados
+                todos_justificados = [str(k).strip() for k in st.session_state["justificaciones_admin"].keys()]
+                is_any_justified = clean_trk_bodega.isin(todos_justificados)
+                
+                df_fallando_base = df_bodega[~has_stat & ~has_dex_excl & ~is_any_justified].dropna(subset=['Tracking Number']).copy()
                 
                 if df_fallando_base.empty:
                     st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación.")
                 else:
-                    # Crear el diccionario de Etiquetas visuales -> Tracking Real
                     display_to_trk = {}
                     for _, row in df_fallando_base.iterrows():
-                        trk = str(row.get('Tracking Number', 'S/N'))
+                        trk = str(row.get('Tracking Number', 'S/N')).strip()
                         if trk not in display_to_trk.values():
                             cliente = str(row.get('Shipper Company', row.get('Shipper Name', 'Desc.')))
                             direccion = str(row.get('CE Recp Address All', 'Desc.'))
-                            # Etiqueta limpia: Tracking ➔ Cliente | Dirección
                             label = f"{trk} ➔ {cliente[:15]} | {direccion[:25]}"
                             display_to_trk[label] = trk
                     
                     opciones_label = list(display_to_trk.keys())
                     
-                    # El nuevo MULTI-SELECT donde puedes ver nombre y dirección
                     trks_seleccionados = st.multiselect("1. Selecciona o busca las Guías a justificar:", opciones_label, placeholder="Elige una o más guías...")
-                    
                     motivo = st.selectbox("2. Categoría Operativa:", ["Sin movimiento", "Sin Van", "POD", "Aplazada"])
                     
                     ruta_input = ""
@@ -727,11 +722,9 @@ if st.session_state["history"]:
                             if motivo == "Sin Van" and len(ruta_input) != 3:
                                 st.warning("⚠️ Debes ingresar un código de ruta de 3 caracteres exactos.")
                             else:
-                                # Guardar la selección múltiple en la memoria
                                 for label in trks_seleccionados:
                                     trk_real = display_to_trk[label]
                                     st.session_state.justificaciones_admin[trk_real] = {"estado": motivo, "ruta": ruta_input}
-                                
                                 st.success(f"¡{len(trks_seleccionados)} guías justificadas correctamente! El KPI se ha actualizado.")
                                 st.rerun()
                         else:
@@ -739,9 +732,9 @@ if st.session_state["history"]:
             
             with c_f2:
                 st.markdown("#### Historial de Modificaciones")
-                if st.session_state.justificaciones_admin:
+                if st.session_state["justificaciones_admin"]:
                     datos_just = []
-                    for k, v in st.session_state.justificaciones_admin.items():
+                    for k, v in st.session_state["justificaciones_admin"].items():
                         estado = v["estado"]
                         impacto = "❌ Sigue en Fallo" if estado == "Sin movimiento" else "✅ Perdonado del KPI"
                         datos_just.append({"Tracking Justificado": k, "Categoría Asignada": estado, "Ruta": v["ruta"], "Impacto en Métrica": impacto})
