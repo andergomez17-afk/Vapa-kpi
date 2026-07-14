@@ -637,7 +637,7 @@ if st.session_state["history"]:
                 st.markdown("<div style='background-color: #1E1E1E; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #FF6600;'>", unsafe_allow_html=True)
                 col_pdf1, col_pdf2 = st.columns([2, 1])
                 with col_pdf1:
-                    auditor_name = st.text_input("👤 Nombre del Supervisor/Auditor (Opcional):", placeholder="Ej. Anderson Gómez")
+                    auditor_name = st.text_input("👤 Nombre del Supervisor/Auditor (Opcional):", placeholder="Ej. Juan Pérez")
                 with col_pdf2:
                     st.write("") 
                     st.write("") 
@@ -862,37 +862,35 @@ if st.session_state["history"]:
             st.markdown("#### 🏁 Cierre Operativo Diario")
             st.markdown("Al presionar este botón, se congelará la métrica actual y quedará guardada permanentemente en el historial del almacén.")
             
-            col_nom, col_ape, col_btn = st.columns([1, 1, 1])
-            with col_nom:
-                nombre_auditor = st.text_input("Ingresar Nombre:")
-            with col_ape:
-                apellido_auditor = st.text_input("Ingresar Apellido:")
+            col_fecha, col_firma, col_btn = st.columns([1, 1.5, 1])
+            with col_fecha:
+                fecha_seleccionada = st.date_input("📅 Fecha del Reporte:")
+            with col_firma:
+                firma_auditor = st.text_input("✍️ Nombre y Apellido:", placeholder="Ej. Juan Pérez")
                 
             with col_btn:
-                st.write("") # Espacio para alinear el botón con los inputs
+                st.write("") 
                 st.write("")
-                if st.button("🔒 CERRAR DÍA (Guardar KPI)", type="primary", use_container_width=True):
-                    if nombre_auditor.strip() == "" or apellido_auditor.strip() == "":
+                if st.button("🔒 CERRAR DÍA", type="primary", use_container_width=True):
+                    if firma_auditor.strip() == "":
                         st.warning("⚠️ Debes ingresar tu Nombre y Apellido para firmar el cierre.")
                     else:
-                        fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        dia_str = datetime.now().strftime("%Y-%m-%d")
-                        
-                        firma_completa = f"{nombre_auditor.strip().capitalize()} {apellido_auditor.strip().capitalize()}"
+                        dia_str = fecha_seleccionada.strftime("%Y-%m-%d")
+                        firma_completa = firma_auditor.strip().title()
                         
                         cierre_data = {
-                            "Fecha de Registro": fecha_hoy,
+                            "Fecha de Registro": f"{dia_str} 23:59:59", # Forzamos la hora para el agrupador del gráfico
                             "Total Procesados": total_ingreso,
                             "Bultos en Ruta": m_en_ruta,
                             "Total Compromisos": total_compromiso_hoy,
                             "Fallando Compromiso": corregir_44_aplazar_total,
-                            "Porcentaje de Éxito": pct_exito, # Guardado como número matemático
+                            "Porcentaje de Éxito": pct_exito, 
                             "Auditor Responsable": firma_completa
                         }
                         
                         st.session_state["cierres_admin"][dia_str] = cierre_data
                         save_cierres(st.session_state["cierres_admin"])
-                        st.success(f"¡Día cerrado con éxito! El KPI quedó registrado a nombre de {firma_completa}.")
+                        st.success(f"¡Día cerrado con éxito! El KPI de {pct_exito}% quedó registrado a nombre de {firma_completa} para el {dia_str}.")
 
     with tab5:
         st.markdown("### 📅 Historial y Rendimiento de la Estación")
@@ -903,10 +901,8 @@ if st.session_state["history"]:
         if historial_cierres:
             df_hist = pd.DataFrame.from_dict(historial_cierres, orient='index')
             
-            # Limpiar datos antiguos si existían con "%" en el texto
             df_hist['Porcentaje de Éxito'] = df_hist['Porcentaje de Éxito'].astype(str).str.replace('%', '').astype(float)
             
-            # Crear columnas de fecha para agrupación
             df_hist['Fecha Real'] = pd.to_datetime(df_hist['Fecha de Registro'])
             df_hist['Semana'] = df_hist['Fecha Real'].dt.strftime('%G-Semana %V')
             df_hist['Mes'] = df_hist['Fecha Real'].dt.strftime('%Y-%m')
@@ -916,7 +912,6 @@ if st.session_state["history"]:
             with tab_diario:
                 df_hist_sorted = df_hist.sort_values(by="Fecha Real")
                 
-                # Gráfico Evolutivo
                 fig_d = px.line(df_hist_sorted, x=df_hist_sorted.index, y="Porcentaje de Éxito", 
                                 markers=True, title="Evolución Diaria del KPI (%)", template="plotly_dark")
                 fig_d.update_traces(line_color="#00AA50", marker=dict(size=10))
@@ -949,13 +944,11 @@ if st.session_state["history"]:
                         st.markdown(html_str, unsafe_allow_html=True)
             
             with tab_semanal:
-                # Agrupar sumando bultos para matemática perfecta
                 df_sem = df_hist.groupby('Semana').agg({
                     'Total Compromisos': 'sum',
                     'Fallando Compromiso': 'sum'
                 }).reset_index()
                 
-                # Fórmula Matemática: 100 - ((Fallando / Total)*100)
                 df_sem['KPI Semanal (%)'] = np.where(df_sem['Total Compromisos'] > 0, 
                                             round(100 - (df_sem['Fallando Compromiso'] / df_sem['Total Compromisos'] * 100), 1), 0)
                 
@@ -964,7 +957,6 @@ if st.session_state["history"]:
                 st.plotly_chart(fig_s, use_container_width=True)
                 
             with tab_mensual:
-                # Agrupar sumando bultos
                 df_mes = df_hist.groupby('Mes').agg({
                     'Total Compromisos': 'sum',
                     'Fallando Compromiso': 'sum'
