@@ -20,7 +20,7 @@ except ImportError:
 # ==============================================================================
 DB_FILE = "vapa_db.json"
 CIERRES_FILE = "vapa_cierres.json"
-UPLOAD_DIR = "vapa_uploads" # <--- CARPETA DEL SERVIDOR PARA EXCEL
+UPLOAD_DIR = "vapa_uploads"
 
 # Crear carpeta de subidas si no existe
 if not os.path.exists(UPLOAD_DIR):
@@ -162,7 +162,7 @@ if "history" not in st.session_state:
     st.session_state["history"] = {}
 
 # ==============================================================================
-# 3. CABECERA PRINCIPAL Y MOTOR ANTI-COLAPSO DE RAM
+# 3. CABECERA PRINCIPAL Y MOTOR 
 # ==============================================================================
 col_titulo, col_salir = st.columns([7, 1])
 with col_titulo:
@@ -214,7 +214,6 @@ class VapaEngine:
         
         return df_vapa, df_bodega
 
-# CACHÉ DE LECTURA FÍSICA PARA ACELERAR CARGA Y PROTEGER MEMORIA
 @st.cache_data(show_spinner=False)
 def load_file_from_disk(filepath):
     try:
@@ -226,7 +225,6 @@ def load_file_from_disk(filepath):
     except Exception as e:
         return None, None
 
-# AUTO-CARGAR ARCHIVOS DEL SERVIDOR (Carpeta vapa_uploads) AL INICIAR
 for filename in os.listdir(UPLOAD_DIR):
     if filename.endswith((".xlsx", ".csv")) and filename not in st.session_state["history"]:
         filepath = os.path.join(UPLOAD_DIR, filename)
@@ -252,7 +250,7 @@ def clean_pdf_text(text):
     return str(text).encode('latin-1', 'replace').decode('latin-1')
 
 # ==============================================================================
-# 4. GENERADOR DE PDF OPERATIVO LIMPIO
+# 4. GENERADOR DE PDF 
 # ==============================================================================
 @st.cache_data(show_spinner=False)
 def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso):
@@ -389,12 +387,11 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             return f.read()
 
 # ==============================================================================
-# 5. BARRA LATERAL ESTABILIZADA CON ESCRITURA EN DISCO (SOLO ADMIN)
+# 5. BARRA LATERAL (CON PROTECCIÓN DE FINES DE SEMANA)
 # ==============================================================================
 st.sidebar.header("📥 Ingreso de Datos")
 
 if st.session_state.get("role") == "admin":
-    # MENÚ DE AJUSTES EN LA PARTE SUPERIOR DE LA BARRA LATERAL
     with st.sidebar.expander("⚙️ Ajustes"):
         st.markdown("<span style='font-size:12px; color:#A0A0A0;'>Usa este botón para borrar todos los Excel del servidor y empezar un mes nuevo.</span>", unsafe_allow_html=True)
         if st.button("🧹 Borrar Historial del Servidor", use_container_width=True, type="primary"):
@@ -406,23 +403,130 @@ if st.session_state.get("role") == "admin":
             st.rerun()
 
     st.sidebar.markdown("Carga aquí los reportes generados por DREUI. Se guardarán en el servidor.")
-    uploaded_files = st.sidebar.file_uploader("Subir Archivos DREUI", type=["xlsx", "csv"], accept_multiple_files=True)
     
-    if st.sidebar.button("⚙️ Guardar y Procesar en Servidor", use_container_width=True):
-        if uploaded_files:
-            for file in uploaded_files:
-                file_path = os.path.join(UPLOAD_DIR, file.name)
-                with open(file_path, "wb") as f:
-                    f.write(file.getbuffer())
-            st.sidebar.success("✅ Archivos subidos y guardados en el servidor local. Reiniciando para cargar...")
-            st.rerun() 
-        else:
-            st.sidebar.warning("Agrega un archivo primero.")
+    # PROTECCIÓN: Bloquear carga los fines de semana
+    if datetime.now().weekday() >= 5: # 5 = Sábado, 6 = Domingo
+        st.sidebar.error("🚫 Carga deshabilitada: Sábados y Domingos no son días laborales.")
+    else:
+        uploaded_files = st.sidebar.file_uploader("Subir Archivos DREUI", type=["xlsx", "csv"], accept_multiple_files=True)
+        if st.sidebar.button("⚙️ Guardar y Procesar en Servidor", use_container_width=True):
+            if uploaded_files:
+                for file in uploaded_files:
+                    file_path = os.path.join(UPLOAD_DIR, file.name)
+                    with open(file_path, "wb") as f:
+                        f.write(file.getbuffer())
+                st.sidebar.success("✅ Archivos subidos y guardados en el servidor local. Reiniciando para cargar...")
+                st.rerun() 
+            else:
+                st.sidebar.warning("Agrega un archivo primero.")
 else:
     st.sidebar.info("📂 Estás operando en modo lectura. Los reportes DREUI han sido cargados por el Administrador desde el servidor central.")
 
 # ==============================================================================
-# 6. DASHBOARD INTERACTIVO
+# 6. MÓDULO DE HISTORIAL GERENCIAL (Gráficos unificados y sin fin de semana)
+# ==============================================================================
+def mostrar_historial_kpi():
+    st.markdown("### 📅 Historial y Rendimiento de la Estación")
+    st.markdown("Visualiza el comportamiento del almacén y los porcentajes de éxito en distintos periodos de tiempo.")
+    
+    historial_cierres = st.session_state.get("cierres_admin", {})
+    
+    if historial_cierres:
+        df_hist = pd.DataFrame.from_dict(historial_cierres, orient='index')
+        
+        df_hist['Porcentaje de Éxito'] = df_hist['Porcentaje de Éxito'].astype(str).str.replace('%', '').astype(float)
+        df_hist['Fecha Real'] = pd.to_datetime(df_hist['Fecha de Registro'])
+        
+        # FILTRO DE FINES DE SEMANA: Ignorar Sábados y Domingos en el historial
+        df_hist_laboral = df_hist[df_hist['Fecha Real'].dt.weekday < 5].copy()
+        
+        if df_hist_laboral.empty:
+            st.warning("No hay registros de cierres en días laborales para mostrar.")
+            return
+
+        df_hist_laboral['Semana'] = df_hist_laboral['Fecha Real'].dt.strftime('%G-Semana %V')
+        df_hist_laboral['Mes'] = df_hist_laboral['Fecha Real'].dt.strftime('%Y-%m')
+        
+        tab_diario, tab_semanal, tab_mensual = st.tabs(["📆 Resumen Diario", "🗓️ Resumen Semanal", "📊 Resumen Mensual"])
+        
+        with tab_diario:
+            df_hist_sorted = df_hist_laboral.sort_values(by="Fecha Real")
+            df_hist_sorted['Fecha Visual'] = df_hist_sorted['Fecha Real'].dt.strftime('%Y-%m-%d')
+            
+            # Gráfico de Barras Idéntico al Principal
+            fig_d = px.bar(df_hist_sorted, x="Fecha Visual", y="Porcentaje de Éxito", text="Porcentaje de Éxito",
+                           title="Evolución Diaria del KPI (%)", template="plotly_dark", color_discrete_sequence=["#00AA50"])
+            fig_d.update_traces(textposition='outside', texttemplate='%{text}%')
+            fig_d.update_layout(height=380, margin=dict(l=0, r=0, t=40, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', dragmode=False)
+            fig_d.update_xaxes(fixedrange=True)
+            fig_d.update_yaxes(fixedrange=True, range=[0, 115]) # Margen extra para que el número no se corte
+            st.plotly_chart(fig_d, use_container_width=True, config={'displayModeBar': False})
+            
+            st.markdown("#### Archivo Estático por Día (Clic para expandir)")
+            
+            for date_str, row in df_hist_laboral.sort_values(by="Fecha Real", ascending=False).iterrows():
+                with st.expander(f"📦 {row['Fecha Visual']} - KPI Final: {row['Porcentaje de Éxito']}% (Cerrado por: {row.get('Auditor Responsable', 'Admin')})"):
+                    html_str = f'''
+                    <div style="display:flex; gap:10px; justify-content:space-between; margin-bottom:10px;">
+                        <div class='metric-box' style='flex:1; border-bottom-color:#8D99AE; min-height:80px; padding:10px;'>
+                            <span class='metric-title' style='font-size:10px;'>Total Procesados</span>
+                            <span class='metric-value' style='font-size:22px;'>{row["Total Procesados"]}</span>
+                        </div>
+                        <div class='metric-box' style='flex:1; border-bottom-color:#06D6A0; min-height:80px; padding:10px;'>
+                            <span class='metric-title' style='font-size:10px;'>En Ruta</span>
+                            <span class='metric-value' style='font-size:22px; color:#06D6A0;'>{row["Bultos en Ruta"]}</span>
+                        </div>
+                        <div class='metric-box' style='flex:1; border-bottom-color:#00AA50; min-height:80px; padding:10px;'>
+                            <span class='metric-title' style='font-size:10px;'>Compromisos (Meta)</span>
+                            <span class='metric-value' style='font-size:22px; color:#00AA50;'>{row["Total Compromisos"]}</span>
+                        </div>
+                        <div class='metric-box' style='flex:1; border-bottom-color:#E63946; min-height:80px; padding:10px;'>
+                            <span class='metric-title' style='font-size:10px;'>Fallando (Stat 44)</span>
+                            <span class='metric-value' style='font-size:22px; color:#E63946;'>{row["Fallando Compromiso"]}</span>
+                        </div>
+                    </div>
+                    '''
+                    st.markdown(html_str, unsafe_allow_html=True)
+        
+        with tab_semanal:
+            df_sem = df_hist_laboral.groupby('Semana').agg({
+                'Total Compromisos': 'sum',
+                'Fallando Compromiso': 'sum'
+            }).reset_index()
+            
+            df_sem['KPI Semanal (%)'] = np.where(df_sem['Total Compromisos'] > 0, 
+                                        round(100 - (df_sem['Fallando Compromiso'] / df_sem['Total Compromisos'] * 100), 1), 0)
+            
+            fig_s = px.bar(df_sem, x='Semana', y='KPI Semanal (%)', text='KPI Semanal (%)',
+                           title="Rendimiento Promedio de Estación por Semana", template="plotly_dark", color_discrete_sequence=["#4D148C"])
+            fig_s.update_traces(textposition='outside', texttemplate='%{text}%')
+            fig_s.update_layout(height=380, margin=dict(l=0, r=0, t=40, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', dragmode=False)
+            fig_s.update_xaxes(fixedrange=True)
+            fig_s.update_yaxes(fixedrange=True, range=[0, 115])
+            st.plotly_chart(fig_s, use_container_width=True, config={'displayModeBar': False})
+            
+        with tab_mensual:
+            df_mes = df_hist_laboral.groupby('Mes').agg({
+                'Total Compromisos': 'sum',
+                'Fallando Compromiso': 'sum'
+            }).reset_index()
+            
+            df_mes['KPI Mensual (%)'] = np.where(df_mes['Total Compromisos'] > 0, 
+                                        round(100 - (df_mes['Fallando Compromiso'] / df_mes['Total Compromisos'] * 100), 1), 0)
+            
+            fig_m = px.bar(df_mes, x='Mes', y='KPI Mensual (%)', text='KPI Mensual (%)',
+                           title="Rendimiento Promedio de Estación por Mes", template="plotly_dark", color_discrete_sequence=["#FF6600"])
+            fig_m.update_traces(textposition='outside', texttemplate='%{text}%')
+            fig_m.update_layout(height=380, margin=dict(l=0, r=0, t=40, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', dragmode=False)
+            fig_m.update_xaxes(fixedrange=True)
+            fig_m.update_yaxes(fixedrange=True, range=[0, 115])
+            st.plotly_chart(fig_m, use_container_width=True, config={'displayModeBar': False})
+
+    else:
+        st.info("Aún no se han registrado cierres de día en la base de datos histórica.")
+
+# ==============================================================================
+# 7. DASHBOARD INTERACTIVO PRINCIPAL
 # ==============================================================================
 if st.session_state["history"]:
     available_days = sorted(list(st.session_state["history"].keys()))
@@ -750,7 +854,6 @@ if st.session_state["history"]:
         st.markdown("### 🛠️ Control de Justificaciones Masivas y Reportes")
         
         if st.session_state["justificaciones_admin"]:
-            # INFORME CSV ENRIQUECIDO CON CLIENTE Y DIRECCIÓN
             datos_csv = []
             for k, v in st.session_state["justificaciones_admin"].items():
                 datos_csv.append({
@@ -762,7 +865,6 @@ if st.session_state["history"]:
                 })
             
             df_informe = pd.DataFrame(datos_csv)
-            # UTF-8-SIG para que Excel lea perfectamente acentos y "ñ"
             csv_informe = df_informe.to_csv(index=False).encode('utf-8-sig')
             
             st.download_button(
@@ -872,14 +974,16 @@ if st.session_state["history"]:
                 st.write("") 
                 st.write("")
                 if st.button("🔒 CERRAR DÍA", type="primary", use_container_width=True):
-                    if firma_auditor.strip() == "":
+                    if fecha_seleccionada.weekday() >= 5: # 5 es Sábado, 6 es Domingo
+                        st.error("🚫 No se pueden realizar cierres operativos los fines de semana (Sábados/Domingos).")
+                    elif firma_auditor.strip() == "":
                         st.warning("⚠️ Debes ingresar tu Nombre y Apellido para firmar el cierre.")
                     else:
                         dia_str = fecha_seleccionada.strftime("%Y-%m-%d")
                         firma_completa = firma_auditor.strip().title()
                         
                         cierre_data = {
-                            "Fecha de Registro": f"{dia_str} 23:59:59", # Forzamos la hora para el agrupador del gráfico
+                            "Fecha de Registro": f"{dia_str} 23:59:59", 
                             "Total Procesados": total_ingreso,
                             "Bultos en Ruta": m_en_ruta,
                             "Total Compromisos": total_compromiso_hoy,
@@ -893,84 +997,21 @@ if st.session_state["history"]:
                         st.success(f"¡Día cerrado con éxito! El KPI de {pct_exito}% quedó registrado a nombre de {firma_completa} para el {dia_str}.")
 
     with tab5:
-        st.markdown("### 📅 Historial y Rendimiento de la Estación")
-        st.markdown("Visualiza el comportamiento del almacén y los porcentajes de éxito en distintos periodos de tiempo.")
-        
-        historial_cierres = st.session_state.get("cierres_admin", {})
-        
-        if historial_cierres:
-            df_hist = pd.DataFrame.from_dict(historial_cierres, orient='index')
-            
-            df_hist['Porcentaje de Éxito'] = df_hist['Porcentaje de Éxito'].astype(str).str.replace('%', '').astype(float)
-            
-            df_hist['Fecha Real'] = pd.to_datetime(df_hist['Fecha de Registro'])
-            df_hist['Semana'] = df_hist['Fecha Real'].dt.strftime('%G-Semana %V')
-            df_hist['Mes'] = df_hist['Fecha Real'].dt.strftime('%Y-%m')
-            
-            tab_diario, tab_semanal, tab_mensual = st.tabs(["📆 Resumen Diario", "🗓️ Resumen Semanal", "📊 Resumen Mensual"])
-            
-            with tab_diario:
-                df_hist_sorted = df_hist.sort_values(by="Fecha Real")
-                
-                fig_d = px.line(df_hist_sorted, x=df_hist_sorted.index, y="Porcentaje de Éxito", 
-                                markers=True, title="Evolución Diaria del KPI (%)", template="plotly_dark")
-                fig_d.update_traces(line_color="#00AA50", marker=dict(size=10))
-                st.plotly_chart(fig_d, use_container_width=True)
-                
-                st.markdown("#### Archivo Estático por Día (Clic para expandir)")
-                
-                for date_str, row in df_hist.sort_values(by="Fecha Real", ascending=False).iterrows():
-                    with st.expander(f"📦 {date_str} - KPI Final: {row['Porcentaje de Éxito']}% (Cerrado por: {row.get('Auditor Responsable', 'Admin')})"):
-                        html_str = f"""
-                        <div style="display:flex; gap:10px; justify-content:space-between; margin-bottom:10px;">
-                            <div class='metric-box' style='flex:1; border-bottom-color:#8D99AE; min-height:80px; padding:10px;'>
-                                <span class='metric-title' style='font-size:10px;'>Total Procesados</span>
-                                <span class='metric-value' style='font-size:22px;'>{row["Total Procesados"]}</span>
-                            </div>
-                            <div class='metric-box' style='flex:1; border-bottom-color:#06D6A0; min-height:80px; padding:10px;'>
-                                <span class='metric-title' style='font-size:10px;'>En Ruta</span>
-                                <span class='metric-value' style='font-size:22px; color:#06D6A0;'>{row["Bultos en Ruta"]}</span>
-                            </div>
-                            <div class='metric-box' style='flex:1; border-bottom-color:#00AA50; min-height:80px; padding:10px;'>
-                                <span class='metric-title' style='font-size:10px;'>Compromisos (Meta)</span>
-                                <span class='metric-value' style='font-size:22px; color:#00AA50;'>{row["Total Compromisos"]}</span>
-                            </div>
-                            <div class='metric-box' style='flex:1; border-bottom-color:#E63946; min-height:80px; padding:10px;'>
-                                <span class='metric-title' style='font-size:10px;'>Fallando (Stat 44)</span>
-                                <span class='metric-value' style='font-size:22px; color:#E63946;'>{row["Fallando Compromiso"]}</span>
-                            </div>
-                        </div>
-                        """
-                        st.markdown(html_str, unsafe_allow_html=True)
-            
-            with tab_semanal:
-                df_sem = df_hist.groupby('Semana').agg({
-                    'Total Compromisos': 'sum',
-                    'Fallando Compromiso': 'sum'
-                }).reset_index()
-                
-                df_sem['KPI Semanal (%)'] = np.where(df_sem['Total Compromisos'] > 0, 
-                                            round(100 - (df_sem['Fallando Compromiso'] / df_sem['Total Compromisos'] * 100), 1), 0)
-                
-                fig_s = px.bar(df_sem, x='Semana', y='KPI Semanal (%)', text='KPI Semanal (%)',
-                               title="Rendimiento de Estación por Semana", template="plotly_dark", color_discrete_sequence=["#4D148C"])
-                st.plotly_chart(fig_s, use_container_width=True)
-                
-            with tab_mensual:
-                df_mes = df_hist.groupby('Mes').agg({
-                    'Total Compromisos': 'sum',
-                    'Fallando Compromiso': 'sum'
-                }).reset_index()
-                
-                df_mes['KPI Mensual (%)'] = np.where(df_mes['Total Compromisos'] > 0, 
-                                            round(100 - (df_mes['Fallando Compromiso'] / df_mes['Total Compromisos'] * 100), 1), 0)
-                
-                fig_m = px.bar(df_mes, x='Mes', y='KPI Mensual (%)', text='KPI Mensual (%)',
-                               title="Rendimiento de Estación por Mes", template="plotly_dark", color_discrete_sequence=["#FF6600"])
-                st.plotly_chart(fig_m, use_container_width=True)
-
-        else:
-            st.info("Aún no se han registrado cierres de día en la base de datos histórica.")
+        mostrar_historial_kpi()
 
 else:
     st.info("👋 ¡Hola! Despliega el menú lateral y espera a que el servidor auto-cargue los reportes, o inicia sesión como Administrador para subir uno nuevo.")
+    
+    st.divider()
+    st.markdown("### 📅 Acceso Rápido a Estadísticas")
+    st.markdown("No necesitas cargar un archivo DREUI para consultar los rendimientos y cierres pasados.")
+    
+    if st.button("📊 Mostrar / Ocultar Historial de Cierres", type="primary", use_container_width=True):
+        st.session_state["ver_solo_historial"] = not st.session_state.get("ver_solo_historial", False)
+        
+    if st.session_state.get("ver_solo_historial", False):
+        st.write("")
+        with st.container():
+            st.markdown("<div style='background-color: #1A1A1A; padding: 20px; border-radius: 10px; border: 1px solid #2F2F2F;'>", unsafe_allow_html=True)
+            mostrar_historial_kpi()
+            st.markdown("</div>", unsafe_allow_html=True)
