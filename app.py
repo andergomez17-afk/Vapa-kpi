@@ -20,7 +20,7 @@ except ImportError:
 # ==============================================================================
 DB_FILE = "vapa_db.json"
 CIERRES_FILE = "vapa_cierres.json"
-UPLOAD_DIR = "vapa_uploads"
+UPLOAD_DIR = "vapa_uploads" # <--- CARPETA DEL SERVIDOR PARA EXCEL
 
 # Crear carpeta de subidas si no existe
 if not os.path.exists(UPLOAD_DIR):
@@ -162,7 +162,7 @@ if "history" not in st.session_state:
     st.session_state["history"] = {}
 
 # ==============================================================================
-# 3. CABECERA PRINCIPAL Y MOTOR 
+# 3. CABECERA PRINCIPAL Y MOTOR ANTI-COLAPSO DE RAM
 # ==============================================================================
 col_titulo, col_salir = st.columns([7, 1])
 with col_titulo:
@@ -214,6 +214,7 @@ class VapaEngine:
         
         return df_vapa, df_bodega
 
+# CACHÉ DE LECTURA FÍSICA PARA ACELERAR CARGA Y PROTEGER MEMORIA
 @st.cache_data(show_spinner=False)
 def load_file_from_disk(filepath):
     try:
@@ -225,6 +226,7 @@ def load_file_from_disk(filepath):
     except Exception as e:
         return None, None
 
+# AUTO-CARGAR ARCHIVOS DEL SERVIDOR (Carpeta vapa_uploads) AL INICIAR
 for filename in os.listdir(UPLOAD_DIR):
     if filename.endswith((".xlsx", ".csv")) and filename not in st.session_state["history"]:
         filepath = os.path.join(UPLOAD_DIR, filename)
@@ -404,7 +406,6 @@ if st.session_state.get("role") == "admin":
 
     st.sidebar.markdown("Carga aquí los reportes generados por DREUI. Se guardarán en el servidor.")
     
-    # PROTECCIÓN: Bloquear carga los fines de semana
     if datetime.now().weekday() >= 5: # 5 = Sábado, 6 = Domingo
         st.sidebar.error("🚫 Carga deshabilitada: Sábados y Domingos no son días laborales.")
     else:
@@ -437,7 +438,6 @@ def mostrar_historial_kpi():
         df_hist['Porcentaje de Éxito'] = df_hist['Porcentaje de Éxito'].astype(str).str.replace('%', '').astype(float)
         df_hist['Fecha Real'] = pd.to_datetime(df_hist['Fecha de Registro'])
         
-        # FILTRO DE FINES DE SEMANA: Ignorar Sábados y Domingos en el historial
         df_hist_laboral = df_hist[df_hist['Fecha Real'].dt.weekday < 5].copy()
         
         if df_hist_laboral.empty:
@@ -446,20 +446,19 @@ def mostrar_historial_kpi():
 
         df_hist_laboral['Semana'] = df_hist_laboral['Fecha Real'].dt.strftime('%G-Semana %V')
         df_hist_laboral['Mes'] = df_hist_laboral['Fecha Real'].dt.strftime('%Y-%m')
+        df_hist_laboral['Fecha Visual'] = df_hist_laboral['Fecha Real'].dt.strftime('%Y-%m-%d')
         
         tab_diario, tab_semanal, tab_mensual = st.tabs(["📆 Resumen Diario", "🗓️ Resumen Semanal", "📊 Resumen Mensual"])
         
         with tab_diario:
             df_hist_sorted = df_hist_laboral.sort_values(by="Fecha Real")
-            df_hist_sorted['Fecha Visual'] = df_hist_sorted['Fecha Real'].dt.strftime('%Y-%m-%d')
             
-            # Gráfico de Barras Idéntico al Principal
             fig_d = px.bar(df_hist_sorted, x="Fecha Visual", y="Porcentaje de Éxito", text="Porcentaje de Éxito",
                            title="Evolución Diaria del KPI (%)", template="plotly_dark", color_discrete_sequence=["#00AA50"])
             fig_d.update_traces(textposition='outside', texttemplate='%{text}%')
             fig_d.update_layout(height=380, margin=dict(l=0, r=0, t=40, b=0), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', dragmode=False)
             fig_d.update_xaxes(fixedrange=True)
-            fig_d.update_yaxes(fixedrange=True, range=[0, 115]) # Margen extra para que el número no se corte
+            fig_d.update_yaxes(fixedrange=True, range=[0, 115]) 
             st.plotly_chart(fig_d, use_container_width=True, config={'displayModeBar': False})
             
             st.markdown("#### Archivo Estático por Día (Clic para expandir)")
