@@ -252,7 +252,7 @@ def clean_pdf_text(text):
     return str(text).encode('latin-1', 'replace').decode('latin-1')
 
 # ==============================================================================
-# 4. GENERADOR DE PDF OPERATIVO LIMPIO
+# 4. GENERADOR DE PDF 
 # ==============================================================================
 @st.cache_data(show_spinner=False)
 def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso):
@@ -394,6 +394,17 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
 st.sidebar.header("📥 Ingreso de Datos")
 
 if st.session_state.get("role") == "admin":
+    # MENÚ DE AJUSTES EN LA PARTE SUPERIOR DE LA BARRA LATERAL
+    with st.sidebar.expander("⚙️ Ajustes"):
+        st.markdown("<span style='font-size:12px; color:#A0A0A0;'>Usa este botón para borrar todos los Excel del servidor y empezar un mes nuevo.</span>", unsafe_allow_html=True)
+        if st.button("🧹 Borrar Historial del Servidor", use_container_width=True, type="primary"):
+            for filename in os.listdir(UPLOAD_DIR):
+                os.remove(os.path.join(UPLOAD_DIR, filename))
+            st.session_state["history"] = {}
+            st.session_state["justificaciones_admin"] = {}
+            save_db({}) 
+            st.rerun()
+
     st.sidebar.markdown("Carga aquí los reportes generados por DREUI. Se guardarán en el servidor.")
     uploaded_files = st.sidebar.file_uploader("Subir Archivos DREUI", type=["xlsx", "csv"], accept_multiple_files=True)
     
@@ -407,16 +418,6 @@ if st.session_state.get("role") == "admin":
             st.rerun() 
         else:
             st.sidebar.warning("Agrega un archivo primero.")
-            
-    with st.sidebar.expander("⚙️ Opciones Avanzadas (Peligro)"):
-        st.markdown("<span style='font-size:12px; color:#A0A0A0;'>Usa este botón para borrar todos los Excel del servidor y empezar un mes nuevo.</span>", unsafe_allow_html=True)
-        if st.button("🧹 Borrar Todos los Archivos del Servidor", use_container_width=True, type="primary"):
-            for filename in os.listdir(UPLOAD_DIR):
-                os.remove(os.path.join(UPLOAD_DIR, filename))
-            st.session_state["history"] = {}
-            st.session_state["justificaciones_admin"] = {}
-            save_db({}) 
-            st.rerun()
 else:
     st.sidebar.info("📂 Estás operando en modo lectura. Los reportes DREUI han sido cargados por el Administrador desde el servidor central.")
 
@@ -467,7 +468,7 @@ if st.session_state["history"]:
         dex_col = df_bodega['DEX All'].astype(str).str.upper()
         has_dex_excl = dex_col.str.contains(r'DEX\[03\]|DEX 03|DEX\[07\]|DEX 07|DEX\[16\]|DEX 16', regex=True, na=False)
         
-    justificados_validos = [str(trk).strip() for trk, data in just_dict.items() if data['estado'] in ["Sin Van", "POD", "Aplazada"]]
+    justificados_validos = [str(trk).strip() for trk, data in just_dict.items() if data.get('estado') in ["Sin Van", "POD", "Aplazada"]]
     is_justified_admin = pd.Series(False, index=df_bodega.index)
     if 'Tracking Number' in df_bodega.columns:
         is_justified_admin = clean_trk_bodega.isin(justificados_validos)
@@ -749,11 +750,23 @@ if st.session_state["history"]:
         st.markdown("### 🛠️ Control de Justificaciones Masivas y Reportes")
         
         if st.session_state["justificaciones_admin"]:
-            df_informe = pd.DataFrame([{"Tracking": k, "Justificación": v["estado"], "Ruta Asignada": v["ruta"]} for k,v in st.session_state["justificaciones_admin"].items()])
-            csv_informe = df_informe.to_csv(index=False).encode('utf-8')
+            # INFORME CSV ENRIQUECIDO CON CLIENTE Y DIRECCIÓN
+            datos_csv = []
+            for k, v in st.session_state["justificaciones_admin"].items():
+                datos_csv.append({
+                    "Tracking": k,
+                    "Cliente": v.get("cliente", "No registrado"),
+                    "Dirección": v.get("direccion", "No registrado"),
+                    "Justificación": v.get("estado", ""),
+                    "Ruta Asignada": v.get("ruta", "")
+                })
+            
+            df_informe = pd.DataFrame(datos_csv)
+            # UTF-8-SIG para que Excel lea perfectamente acentos y "ñ"
+            csv_informe = df_informe.to_csv(index=False).encode('utf-8-sig')
             
             st.download_button(
-                label="📥 Descargar Informe Completo de Justificaciones y Modificaciones (CSV)",
+                label="📥 Descargar Informe de Justificaciones (CSV)",
                 data=csv_informe,
                 file_name=f"Informe_Justificaciones_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv",
@@ -779,16 +792,24 @@ if st.session_state["history"]:
                 if df_fallando_base.empty:
                     st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación en la base actual.")
                 else:
-                    display_to_trk = {}
+                    display_to_data = {}
+                    vistos = set()
+                    
                     for _, row in df_fallando_base.iterrows():
                         trk = str(row.get('Tracking Number', 'S/N')).strip()
-                        if trk not in display_to_trk.values():
+                        if trk not in vistos:
+                            vistos.add(trk)
                             cliente = str(row.get('Shipper Company', row.get('Shipper Name', 'Desc.')))
                             direccion = str(row.get('CE Recp Address All', 'Desc.'))
                             label = f"{trk} ➔ {cliente[:15]} | {direccion[:25]}"
-                            display_to_trk[label] = trk
+                            
+                            display_to_data[label] = {
+                                "trk": trk,
+                                "cliente": cliente,
+                                "direccion": direccion
+                            }
                     
-                    opciones_label = list(display_to_trk.keys())
+                    opciones_label = list(display_to_data.keys())
                     
                     trks_seleccionados = st.multiselect("1. Selecciona o busca las Guías a justificar:", opciones_label, placeholder="Elige una o más guías...")
                     motivo = st.selectbox("2. Categoría Operativa:", ["Sin movimiento", "Sin Van", "POD", "Aplazada"])
@@ -803,12 +824,16 @@ if st.session_state["history"]:
                                 st.warning("⚠️ Debes ingresar un código de ruta de 3 caracteres exactos.")
                             else:
                                 for label in trks_seleccionados:
-                                    trk_real = display_to_trk[label]
-                                    # En vez de st.rerun que satura, solo guardamos silenciosamente en el estado
-                                    st.session_state["justificaciones_admin"][trk_real] = {"estado": motivo, "ruta": ruta_input}
+                                    data_real = display_to_data[label]
+                                    st.session_state["justificaciones_admin"][data_real["trk"]] = {
+                                        "estado": motivo, 
+                                        "ruta": ruta_input,
+                                        "cliente": data_real["cliente"],
+                                        "direccion": data_real["direccion"]
+                                    }
                                 
                                 save_db(st.session_state["justificaciones_admin"])
-                                st.success(f"¡{len(trks_seleccionados)} guías justificadas correctamente! Refresca para ver los cambios.")
+                                st.success(f"¡{len(trks_seleccionados)} guías justificadas correctamente! Refresca la tabla para ver los cambios.")
                         else:
                             st.warning("Por favor selecciona al menos una guía de la lista.")
             
@@ -817,9 +842,15 @@ if st.session_state["history"]:
                 if st.session_state["justificaciones_admin"]:
                     datos_just = []
                     for k, v in st.session_state["justificaciones_admin"].items():
-                        estado = v["estado"]
+                        estado = v.get("estado", "")
                         impacto = "❌ Sigue en Fallo" if estado == "Sin movimiento" else "✅ Perdonado del KPI"
-                        datos_just.append({"Tracking Justificado": k, "Categoría Asignada": estado, "Ruta": v["ruta"], "Impacto en Métrica": impacto})
+                        datos_just.append({
+                            "Tracking": k, 
+                            "Cliente": v.get("cliente", "N/A"),
+                            "Categoría": estado, 
+                            "Ruta": v.get("ruta", ""), 
+                            "KPI": impacto
+                        })
                         
                     st.dataframe(pd.DataFrame(datos_just), use_container_width=True, hide_index=True)
                 else:
