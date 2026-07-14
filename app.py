@@ -252,10 +252,10 @@ def clean_pdf_text(text):
     return str(text).encode('latin-1', 'replace').decode('latin-1')
 
 # ==============================================================================
-# 4. GENERADOR DE PDF 
+# 4. GENERADOR DE PDF OPERATIVO LIMPIO
 # ==============================================================================
 @st.cache_data(show_spinner=False)
-def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, count_master_parciales, df_criticos, total_compromiso):
+def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
@@ -337,7 +337,6 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             add_row(f"Ingreso Cliente {cli['nombre']}", cli['cantidad'], (245, 235, 255), (77, 20, 140))
             
     add_row("Corregir Stat 44 y Aplazar (Fallando Compromiso)", corregir_total, (255, 230, 230), (200, 0, 0))
-    add_row("Masters con Despacho Parcial (Piezas Quedadas)", count_master_parciales, (240, 240, 240), (0, 0, 0))
     
     def imprimir_cabecera_tabla_roja():
         pdf.set_fill_color(200, 0, 0)
@@ -405,7 +404,7 @@ if st.session_state.get("role") == "admin":
                 with open(file_path, "wb") as f:
                     f.write(file.getbuffer())
             st.sidebar.success("✅ Archivos subidos y guardados en el servidor local. Reiniciando para cargar...")
-            st.rerun()
+            st.rerun() 
         else:
             st.sidebar.warning("Agrega un archivo primero.")
             
@@ -493,27 +492,6 @@ if st.session_state["history"]:
         df_compromiso = df_compromiso[~is_justified_tot]
 
     total_compromiso_hoy = len(df_compromiso)
-
-    # LÓGICA DE MASTER Y GUÍAS PARCIALES
-    master_col = None
-    for c in ['Master Tracking Number', 'Master Tracking', 'Master Tracking No', 'Guia Master', 'Form Bundle ID']:
-        if c in df_vapa.columns:
-            master_col = c
-            break
-            
-    df_parciales_estacion = pd.DataFrame()
-    if master_col:
-        df_con_master = df_vapa[df_vapa[master_col].notna() & (df_vapa[master_col].astype(str).str.strip() != "")]
-        if not df_con_master.empty:
-            grouped = df_con_master.groupby(master_col)
-            parciales_masters_list = []
-            for m_id, group in grouped:
-                has_pieces_van = group['VAN All'].notna() & (group['VAN All'].astype(str).str.strip() != "")
-                if len(group[has_pieces_van]) > 0 and len(group[~has_pieces_van]) > 0:
-                    parciales_masters_list.append(m_id)
-            df_parciales_estacion = df_con_master[df_con_master[master_col].isin(parciales_masters_list) & (df_con_master['VAN All'].isna() | (df_con_master['VAN All'].astype(str).str.strip() == ""))]
-    
-    count_master_parciales = len(df_parciales_estacion)
 
     # --- CÁLCULO DE KPIs ---
     if total_compromiso_hoy > 0:
@@ -643,8 +621,7 @@ if st.session_state["history"]:
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
         {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
-        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"},
-        {"nombre": "Master Parciales (Huérfanas)", "cantidad": count_master_parciales, "df": df_parciales_estacion, "color": "#FFCC00"}
+        {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"}
     ]
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
@@ -671,7 +648,6 @@ if st.session_state["history"]:
                         clientes_ordenados=clientes_ordenados,
                         corregir_total=corregir_44_aplazar_total, 
                         en_ruta=m_en_ruta,   
-                        count_master_parciales=count_master_parciales,
                         df_criticos=df_corregir,
                         total_compromiso=total_compromiso_hoy
                     )
@@ -683,8 +659,6 @@ if st.session_state["history"]:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
         cols_metricas = st.columns(len(metricas_ordenadas))
         for i, col in enumerate(cols_metricas):
@@ -734,12 +708,11 @@ if st.session_state["history"]:
 
     with tab3:
         st.markdown("### Control de Envejecimiento (≥ 3 días)")
-        st.markdown("Aquí se muestran únicamente los bultos que fallan compromiso y **no tienen justificación**, o aquellos que el administrador marcó explícitamente como **'Sin Movimiento'** y que se han repetido por 3 días o más en el sistema.")
+        st.markdown("Aquí se muestran los bultos que fallan compromiso sin justificación, o aquellos marcados explícitamente como **'Sin Movimiento'** que se han repetido por 3 días en los archivos del servidor.")
         
         tracking_counts = {}
         tracking_info = {}
 
-        # Escanear el historial completo en busca de bultos estancados
         for day_name, data in st.session_state["history"].items():
             df_b = data["bodega"]
             if 'Tracking Number' in df_b.columns:
@@ -747,7 +720,6 @@ if st.session_state["history"]:
                     trk = str(row['Tracking Number']).replace('.0', '').strip()
                     estado_admin = just_dict.get(trk, {}).get('estado', '')
                     
-                    # Ignorar los que están justificados sanamente
                     if estado_admin in ["Sin Van", "POD", "Aplazada"]:
                         continue
                         
@@ -776,7 +748,6 @@ if st.session_state["history"]:
     with tab4:
         st.markdown("### 🛠️ Control de Justificaciones Masivas y Reportes")
         
-        # BOTÓN DE DESCARGA DISPONIBLE PARA TODOS (Admin y Operadores)
         if st.session_state["justificaciones_admin"]:
             df_informe = pd.DataFrame([{"Tracking": k, "Justificación": v["estado"], "Ruta Asignada": v["ruta"]} for k,v in st.session_state["justificaciones_admin"].items()])
             csv_informe = df_informe.to_csv(index=False).encode('utf-8')
@@ -800,7 +771,6 @@ if st.session_state["history"]:
             with c_f1:
                 st.markdown("#### Seleccionar Guías (Multiselección)")
                 
-                # Para la lista visual usamos SOLO los bultos que AÚN NO han sido justificados como perdonados
                 todos_justificados = [str(k).strip() for k in st.session_state["justificaciones_admin"].keys()]
                 is_any_justified = clean_trk_bodega.isin(todos_justificados)
                 
@@ -824,21 +794,21 @@ if st.session_state["history"]:
                     motivo = st.selectbox("2. Categoría Operativa:", ["Sin movimiento", "Sin Van", "POD", "Aplazada"])
                     
                     ruta_input = ""
-                    if motivo == "Sin Van":
+                    if motivo in ["Sin Van", "POD"]:
                         ruta_input = st.text_input("3. Ingresar Número de Ruta (Ej. 101):", max_chars=3)
                         
                     if st.button("💾 Guardar en Base de Datos", use_container_width=True):
                         if trks_seleccionados:
-                            if motivo == "Sin Van" and len(ruta_input) != 3:
+                            if motivo in ["Sin Van", "POD"] and len(ruta_input) != 3:
                                 st.warning("⚠️ Debes ingresar un código de ruta de 3 caracteres exactos.")
                             else:
                                 for label in trks_seleccionados:
                                     trk_real = display_to_trk[label]
+                                    # En vez de st.rerun que satura, solo guardamos silenciosamente en el estado
                                     st.session_state["justificaciones_admin"][trk_real] = {"estado": motivo, "ruta": ruta_input}
                                 
                                 save_db(st.session_state["justificaciones_admin"])
-                                st.success(f"¡{len(trks_seleccionados)} guías justificadas correctamente! El KPI se ha actualizado.")
-                                st.rerun()
+                                st.success(f"¡{len(trks_seleccionados)} guías justificadas correctamente! Refresca para ver los cambios.")
                         else:
                             st.warning("Por favor selecciona al menos una guía de la lista.")
             
@@ -877,7 +847,6 @@ if st.session_state["history"]:
                         "Auditor Responsable": "Admin"
                     }
                     
-                    # Guardamos el cierre bajo la fecha de hoy
                     st.session_state["cierres_admin"][dia_str] = cierre_data
                     save_cierres(st.session_state["cierres_admin"])
                     st.success(f"¡Día cerrado con éxito! El KPI de {pct_exito}% quedó registrado en el Historial.")
@@ -890,7 +859,6 @@ if st.session_state["history"]:
         
         if historial_cierres:
             df_historial = pd.DataFrame.from_dict(historial_cierres, orient='index')
-            # Ordenamos del más reciente al más antiguo
             df_historial = df_historial.sort_values(by="Fecha de Registro", ascending=False)
             
             st.dataframe(df_historial, use_container_width=True)
