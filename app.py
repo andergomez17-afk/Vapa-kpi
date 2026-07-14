@@ -401,12 +401,11 @@ if st.session_state.get("role") == "admin":
     if st.sidebar.button("⚙️ Guardar y Procesar en Servidor", use_container_width=True):
         if uploaded_files:
             for file in uploaded_files:
-                # Guardar en disco duro de la PC (vapa_uploads/)
                 file_path = os.path.join(UPLOAD_DIR, file.name)
                 with open(file_path, "wb") as f:
                     f.write(file.getbuffer())
             st.sidebar.success("✅ Archivos subidos y guardados en el servidor local. Reiniciando para cargar...")
-            st.rerun() # Reinicia la página para que el código de auto-carga los detecte
+            st.rerun()
         else:
             st.sidebar.warning("Agrega un archivo primero.")
             
@@ -417,7 +416,7 @@ if st.session_state.get("role") == "admin":
                 os.remove(os.path.join(UPLOAD_DIR, filename))
             st.session_state["history"] = {}
             st.session_state["justificaciones_admin"] = {}
-            save_db({}) # Limpia justificaciones
+            save_db({}) 
             st.rerun()
 else:
     st.sidebar.info("📂 Estás operando en modo lectura. Los reportes DREUI han sido cargados por el Administrador desde el servidor central.")
@@ -429,7 +428,6 @@ if st.session_state["history"]:
     available_days = sorted(list(st.session_state["history"].keys()))
     selected_day = st.sidebar.selectbox("📅 Seleccionar Reporte de Servidor", available_days)
     
-    # Trabajamos con copias protegidas
     df_vapa = st.session_state["history"][selected_day]["vapa"].copy()
     df_bodega = st.session_state["history"][selected_day]["bodega"].copy()
     
@@ -458,7 +456,7 @@ if st.session_state["history"]:
     m_en_ruta = len(df_en_ruta)
     
     # -------------------------------------------------------------------------
-    # EXCLUSIÓN DE DEX 16 Y LÓGICA DE JUSTIFICACIONES ADMIN PERFECTA
+    # EXCLUSIÓN DE DEX 16 Y LÓGICA DE JUSTIFICACIONES ADMIN
     # -------------------------------------------------------------------------
     has_stat = pd.Series(False, index=df_bodega.index)
     for stat_col in ['STAT 44 Date Time Latest', 'STAT 50 Latest', 'STAT 53 All', 'STAT 37 Latest', 'STAT 27 Latest']:
@@ -651,7 +649,6 @@ if st.session_state["history"]:
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
     
-    # ---------------- TABLERO CON 5 PESTAÑAS (INCLUYE CIERRE HISTÓRICO) ----------------
     tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin", "📅 Historial KPI"])
     
     with tab1:
@@ -686,6 +683,8 @@ if st.session_state["history"]:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
         cols_metricas = st.columns(len(metricas_ordenadas))
         for i, col in enumerate(cols_metricas):
@@ -745,7 +744,7 @@ if st.session_state["history"]:
             df_b = data["bodega"]
             if 'Tracking Number' in df_b.columns:
                 for _, row in df_b.iterrows():
-                    trk = str(row['Tracking Number']).astype(str).replace('.0', '').strip()
+                    trk = str(row['Tracking Number']).replace('.0', '').strip()
                     estado_admin = just_dict.get(trk, {}).get('estado', '')
                     
                     # Ignorar los que están justificados sanamente
@@ -899,4 +898,4 @@ if st.session_state["history"]:
             st.info("Aún no se han registrado cierres de día en la base de datos histórica. Cuando el administrador cierre el turno, aparecerá aquí.")
 
 else:
-    st.info("👋 ¡Hola! Despliega el menú lateral y adjunta el archivo generado por DREUI para empezar.")
+    st.info("👋 ¡Hola! Despliega el menú lateral y espera a que el servidor auto-cargue los reportes, o inicia sesión como Administrador para subir uno nuevo.")
