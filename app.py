@@ -6,7 +6,7 @@ from datetime import datetime
 import tempfile
 import json
 import os
-import gc  # Liberador de Memoria RAM
+import gc
 
 # Intentar importar la librería para PDF
 try:
@@ -16,10 +16,15 @@ except ImportError:
     HAS_FPDF = False
 
 # ==============================================================================
-# 0. CONFIGURACIÓN DE LAS BASES DE DATOS LOCALES (JSON)
+# 0. CONFIGURACIÓN DE LAS BASES DE DATOS LOCALES Y CARPETAS DEL SERVIDOR
 # ==============================================================================
 DB_FILE = "vapa_db.json"
 CIERRES_FILE = "vapa_cierres.json"
+UPLOAD_DIR = "vapa_uploads" # <--- CARPETA DEL SERVIDOR PARA EXCEL
+
+# Crear carpeta de subidas si no existe
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
 
 def load_db():
     if os.path.exists(DB_FILE):
@@ -182,7 +187,6 @@ class VapaEngine:
         hoy = datetime.now()
         df['Fecha de Carga'] = hoy.strftime('%Y-%m-%d')
         
-        # LIMPIEZA DE TRACKING (Evita el problema de decimales .0 de Excel)
         if 'Tracking Number' in df.columns:
             df['Tracking Number'] = df['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         
@@ -210,39 +214,25 @@ class VapaEngine:
         
         return df_vapa, df_bodega
 
-    @staticmethod
-    def process_file(file):
-        tmp_path = ""
-        try:
-            # MOTOR ANTI-COLAPSO: Guardar en disco duro temporalmente
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                tmp.write(file.getvalue())
-                tmp_path = tmp.name
-                
-            # Cargar de manera directa
-            df_raw = pd.read_excel(tmp_path, sheet_name=None)
-            sheet_name = 'BD' if 'BD' in df_raw else list(df_raw.keys())[0]
-            df = df_raw[sheet_name]
-            
-            # ELIMINAR BASURA DIGITAL (Celdas invisibles que rompen la RAM)
-            df.dropna(how='all', inplace=True)
-            df.dropna(how='all', axis=1, inplace=True)
-            
-            df.columns = [str(c).strip() for c in df.columns]
-            
-            # Limpieza exhaustiva de memoria antes de procesar
-            del df_raw
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            gc.collect() 
-            
-            return VapaEngine.process_file_data(df)
-            
-        except Exception as e:
-            st.error(f"Error crítico al procesar el archivo: {e}")
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            return None, None
+# CACHÉ DE LECTURA FÍSICA PARA ACELERAR CARGA Y PROTEGER MEMORIA
+@st.cache_data(show_spinner=False)
+def load_file_from_disk(filepath):
+    try:
+        xls = pd.ExcelFile(filepath)
+        sheet_name = 'BD' if 'BD' in xls.sheet_names else xls.sheet_names[0]
+        df = pd.read_excel(xls, sheet_name=sheet_name)
+        df.columns = [str(c).strip() for c in df.columns]
+        return VapaEngine.process_file_data(df)
+    except Exception as e:
+        return None, None
+
+# AUTO-CARGAR ARCHIVOS DEL SERVIDOR (Carpeta vapa_uploads) AL INICIAR
+for filename in os.listdir(UPLOAD_DIR):
+    if filename.endswith((".xlsx", ".csv")) and filename not in st.session_state["history"]:
+        filepath = os.path.join(UPLOAD_DIR, filename)
+        df_v, df_b = load_file_from_disk(filepath)
+        if df_v is not None:
+            st.session_state["history"][filename] = {"vapa": df_v, "bodega": df_b}
 
 def color_fedex_cliente(row):
     fila_str = ""
@@ -262,7 +252,7 @@ def clean_pdf_text(text):
     return str(text).encode('latin-1', 'replace').decode('latin-1')
 
 # ==============================================================================
-# 4. GENERADOR DE PDF (CON CACHÉ PARA EVITAR COLAPSOS DE MEMORIA)
+# 4. GENERADOR DE PDF 
 # ==============================================================================
 @st.cache_data(show_spinner=False)
 def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, count_master_parciales, df_criticos, total_compromiso):
@@ -400,38 +390,46 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             return f.read()
 
 # ==============================================================================
-# 5. BARRA LATERAL DE INGRESO
+# 5. BARRA LATERAL ESTABILIZADA CON ESCRITURA EN DISCO (SOLO ADMIN)
 # ==============================================================================
 st.sidebar.header("📥 Ingreso de Datos")
-st.sidebar.markdown("Carga aquí los reportes generados por DREUI.")
 
-uploaded_files = st.sidebar.file_uploader("", type=["xlsx", "csv"], accept_multiple_files=True)
-if st.sidebar.button("⚙️ Procesar Archivos", use_container_width=True):
-    if uploaded_files:
-        for file in uploaded_files:
-            if file.name not in st.session_state["history"]:
-                with st.spinner(f"Optimizando y procesando {file.name}..."):
-                    df_vapa, df_bodega = VapaEngine.process_file(file)
-                    if df_vapa is not None:
-                        st.session_state["history"][file.name] = {"vapa": df_vapa, "bodega": df_bodega}
-        st.sidebar.success("✅ Archivos procesados exitosamente.")
-    else:
-        st.sidebar.warning("Agrega un archivo primero.")
-
-# Botón Oculto Anti-Accidentes
-with st.sidebar.expander("⚙️ Opciones Avanzadas"):
-    st.markdown("<span style='font-size:12px; color:#A0A0A0;'>Usa este botón si la página está lenta o necesitas vaciar los reportes Excel subidos.</span>", unsafe_allow_html=True)
-    if st.button("🧹 Limpiar Excel de Memoria", use_container_width=True):
-        st.session_state["history"] = {}
-        st.rerun()
+if st.session_state.get("role") == "admin":
+    st.sidebar.markdown("Carga aquí los reportes generados por DREUI. Se guardarán en el servidor.")
+    uploaded_files = st.sidebar.file_uploader("Subir Archivos DREUI", type=["xlsx", "csv"], accept_multiple_files=True)
+    
+    if st.sidebar.button("⚙️ Guardar y Procesar en Servidor", use_container_width=True):
+        if uploaded_files:
+            for file in uploaded_files:
+                # Guardar en disco duro de la PC (vapa_uploads/)
+                file_path = os.path.join(UPLOAD_DIR, file.name)
+                with open(file_path, "wb") as f:
+                    f.write(file.getbuffer())
+            st.sidebar.success("✅ Archivos subidos y guardados en el servidor local. Reiniciando para cargar...")
+            st.rerun() # Reinicia la página para que el código de auto-carga los detecte
+        else:
+            st.sidebar.warning("Agrega un archivo primero.")
+            
+    with st.sidebar.expander("⚙️ Opciones Avanzadas (Peligro)"):
+        st.markdown("<span style='font-size:12px; color:#A0A0A0;'>Usa este botón para borrar todos los Excel del servidor y empezar un mes nuevo.</span>", unsafe_allow_html=True)
+        if st.button("🧹 Borrar Todos los Archivos del Servidor", use_container_width=True, type="primary"):
+            for filename in os.listdir(UPLOAD_DIR):
+                os.remove(os.path.join(UPLOAD_DIR, filename))
+            st.session_state["history"] = {}
+            st.session_state["justificaciones_admin"] = {}
+            save_db({}) # Limpia justificaciones
+            st.rerun()
+else:
+    st.sidebar.info("📂 Estás operando en modo lectura. Los reportes DREUI han sido cargados por el Administrador desde el servidor central.")
 
 # ==============================================================================
 # 6. DASHBOARD INTERACTIVO
 # ==============================================================================
 if st.session_state["history"]:
     available_days = sorted(list(st.session_state["history"].keys()))
-    selected_day = st.sidebar.selectbox("📅 Seleccionar Historial", available_days)
+    selected_day = st.sidebar.selectbox("📅 Seleccionar Reporte de Servidor", available_days)
     
+    # Trabajamos con copias protegidas
     df_vapa = st.session_state["history"][selected_day]["vapa"].copy()
     df_bodega = st.session_state["history"][selected_day]["bodega"].copy()
     
@@ -688,8 +686,6 @@ if st.session_state["history"]:
                         use_container_width=True
                     )
                 st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ Recuerda agregar 'fpdf' en tu archivo requirements.txt para habilitar la descarga del documento PDF.")
         
         cols_metricas = st.columns(len(metricas_ordenadas))
         for i, col in enumerate(cols_metricas):
@@ -739,23 +735,65 @@ if st.session_state["history"]:
 
     with tab3:
         st.markdown("### Control de Envejecimiento (≥ 3 días)")
-        tracking_history = {}
-        for day_name, data in st.session_state.history.items():
-            if 'Tracking Number' in data["bodega"].columns:
-                for tracking in data["bodega"]['Tracking Number'].dropna().unique():
-                    tracking_history[tracking] = tracking_history.get(tracking, 0) + 1
-        alertas_criticas = [{"Tracking Number": k, "Días Detectado en Estación": v, "Riesgo Operativo": "Estancamiento Crítico"} for k, v in tracking_history.items() if v >= 3]
+        st.markdown("Aquí se muestran únicamente los bultos que fallan compromiso y **no tienen justificación**, o aquellos que el administrador marcó explícitamente como **'Sin Movimiento'** y que se han repetido por 3 días o más en el sistema.")
+        
+        tracking_counts = {}
+        tracking_info = {}
+
+        # Escanear el historial completo en busca de bultos estancados
+        for day_name, data in st.session_state["history"].items():
+            df_b = data["bodega"]
+            if 'Tracking Number' in df_b.columns:
+                for _, row in df_b.iterrows():
+                    trk = str(row['Tracking Number']).astype(str).replace('.0', '').strip()
+                    estado_admin = just_dict.get(trk, {}).get('estado', '')
+                    
+                    # Ignorar los que están justificados sanamente
+                    if estado_admin in ["Sin Van", "POD", "Aplazada"]:
+                        continue
+                        
+                    tracking_counts[trk] = tracking_counts.get(trk, 0) + 1
+                    tracking_info[trk] = {
+                        "Tracking Number": trk,
+                        "Cliente": str(row.get('Shipper Company', row.get('Shipper Name', 'N/A'))),
+                        "Estado": "Falta de Gestión" if not estado_admin else estado_admin
+                    }
+                    
+        alertas_criticas = []
+        for trk, count in tracking_counts.items():
+            if count >= 3:
+                info = tracking_info[trk]
+                info["Días Detectado"] = count
+                info["Riesgo Operativo"] = "Estancamiento Crítico 🚨"
+                alertas_criticas.append(info)
+
         if alertas_criticas:
-            pérdidas_df = pd.DataFrame(alertas_criticas).sort_values(by="Días Detectado en Estación", ascending=False)
-            st.error(f"⚠️ Atención: Se han detectado {len(pérdidas_df)} bultos críticos estancados.")
-            st.dataframe(pérdidas_df, use_container_width=True, hide_index=True)
+            df_alertas = pd.DataFrame(alertas_criticas).sort_values(by="Días Detectado", ascending=False)
+            st.error(f"⚠️ Atención: Se han detectado {len(df_alertas)} bultos críticos estancados.")
+            st.dataframe(df_alertas, use_container_width=True, hide_index=True)
         else:
             st.success("✅ La operación fluye correctamente. Ningún bulto muestra patrones de estancamiento prolongado.")
 
     with tab4:
-        st.markdown("### 🛠️ Control de Justificaciones Masivas y Cierre")
+        st.markdown("### 🛠️ Control de Justificaciones Masivas y Reportes")
+        
+        # BOTÓN DE DESCARGA DISPONIBLE PARA TODOS (Admin y Operadores)
+        if st.session_state["justificaciones_admin"]:
+            df_informe = pd.DataFrame([{"Tracking": k, "Justificación": v["estado"], "Ruta Asignada": v["ruta"]} for k,v in st.session_state["justificaciones_admin"].items()])
+            csv_informe = df_informe.to_csv(index=False).encode('utf-8')
+            
+            st.download_button(
+                label="📥 Descargar Informe Completo de Justificaciones y Modificaciones (CSV)",
+                data=csv_informe,
+                file_name=f"Informe_Justificaciones_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+                type="primary"
+            )
+        st.divider()
+
         if st.session_state.get("role") != "admin":
-            st.error("🔒 ACCESO DENEGADO. Solo el equipo de Administración puede modificar el status de la carga y cerrar el día.")
+            st.error("🔒 ACCESO DENEGADO. Solo el equipo de Administración puede modificar el status de la carga estancada y cerrar el día.")
             st.info("Para acceder, debe cerrar sesión e ingresar con la credencial de Administrador.")
         else:
             c_f1, c_f2 = st.columns([1, 1])
@@ -763,10 +801,14 @@ if st.session_state["history"]:
             with c_f1:
                 st.markdown("#### Seleccionar Guías (Multiselección)")
                 
-                df_fallando_base = df_bodega[~has_stat & ~has_dex_excl & ~is_justified_admin].dropna(subset=['Tracking Number']).copy()
+                # Para la lista visual usamos SOLO los bultos que AÚN NO han sido justificados como perdonados
+                todos_justificados = [str(k).strip() for k in st.session_state["justificaciones_admin"].keys()]
+                is_any_justified = clean_trk_bodega.isin(todos_justificados)
+                
+                df_fallando_base = df_bodega[~has_stat & ~has_dex_excl & ~is_any_justified].dropna(subset=['Tracking Number']).copy()
                 
                 if df_fallando_base.empty:
-                    st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación.")
+                    st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación en la base actual.")
                 else:
                     display_to_trk = {}
                     for _, row in df_fallando_base.iterrows():
