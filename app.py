@@ -252,7 +252,7 @@ def clean_pdf_text(text):
     return str(text).encode('latin-1', 'replace').decode('latin-1')
 
 # ==============================================================================
-# 4. GENERADOR DE PDF 
+# 4. GENERADOR DE PDF OPERATIVO LIMPIO
 # ==============================================================================
 @st.cache_data(show_spinner=False)
 def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso):
@@ -858,43 +858,127 @@ if st.session_state["history"]:
 
             st.divider()
             
-            # --- BOTÓN DE CIERRE DE DÍA ---
+            # --- BOTÓN DE CIERRE DE DÍA CON FIRMA DE AUDITOR ---
             st.markdown("#### 🏁 Cierre Operativo Diario")
             st.markdown("Al presionar este botón, se congelará la métrica actual y quedará guardada permanentemente en el historial del almacén.")
             
-            col_c1, col_c2 = st.columns([1, 2])
-            with col_c1:
+            col_nom, col_ape, col_btn = st.columns([1, 1, 1])
+            with col_nom:
+                nombre_auditor = st.text_input("Ingresar Nombre:")
+            with col_ape:
+                apellido_auditor = st.text_input("Ingresar Apellido:")
+                
+            with col_btn:
+                st.write("") # Espacio para alinear el botón con los inputs
+                st.write("")
                 if st.button("🔒 CERRAR DÍA (Guardar KPI)", type="primary", use_container_width=True):
-                    fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    dia_str = datetime.now().strftime("%Y-%m-%d")
-                    
-                    cierre_data = {
-                        "Fecha de Registro": fecha_hoy,
-                        "Total Procesados": total_ingreso,
-                        "Bultos en Ruta": m_en_ruta,
-                        "Total Compromisos": total_compromiso_hoy,
-                        "Fallando Compromiso": corregir_44_aplazar_total,
-                        "Porcentaje de Éxito": f"{pct_exito}%",
-                        "Auditor Responsable": "Admin"
-                    }
-                    
-                    st.session_state["cierres_admin"][dia_str] = cierre_data
-                    save_cierres(st.session_state["cierres_admin"])
-                    st.success(f"¡Día cerrado con éxito! El KPI de {pct_exito}% quedó registrado en el Historial.")
+                    if nombre_auditor.strip() == "" or apellido_auditor.strip() == "":
+                        st.warning("⚠️ Debes ingresar tu Nombre y Apellido para firmar el cierre.")
+                    else:
+                        fecha_hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        dia_str = datetime.now().strftime("%Y-%m-%d")
+                        
+                        firma_completa = f"{nombre_auditor.strip().capitalize()} {apellido_auditor.strip().capitalize()}"
+                        
+                        cierre_data = {
+                            "Fecha de Registro": fecha_hoy,
+                            "Total Procesados": total_ingreso,
+                            "Bultos en Ruta": m_en_ruta,
+                            "Total Compromisos": total_compromiso_hoy,
+                            "Fallando Compromiso": corregir_44_aplazar_total,
+                            "Porcentaje de Éxito": pct_exito, # Guardado como número matemático
+                            "Auditor Responsable": firma_completa
+                        }
+                        
+                        st.session_state["cierres_admin"][dia_str] = cierre_data
+                        save_cierres(st.session_state["cierres_admin"])
+                        st.success(f"¡Día cerrado con éxito! El KPI quedó registrado a nombre de {firma_completa}.")
 
     with tab5:
-        st.markdown("### 📅 Historial de Cierres de Turno")
-        st.markdown("Aquí puedes visualizar el comportamiento del almacén y los porcentajes de éxito históricos.")
+        st.markdown("### 📅 Historial y Rendimiento de la Estación")
+        st.markdown("Visualiza el comportamiento del almacén y los porcentajes de éxito en distintos periodos de tiempo.")
         
         historial_cierres = st.session_state.get("cierres_admin", {})
         
         if historial_cierres:
-            df_historial = pd.DataFrame.from_dict(historial_cierres, orient='index')
-            df_historial = df_historial.sort_values(by="Fecha de Registro", ascending=False)
+            df_hist = pd.DataFrame.from_dict(historial_cierres, orient='index')
             
-            st.dataframe(df_historial, use_container_width=True)
+            # Limpiar datos antiguos si existían con "%" en el texto
+            df_hist['Porcentaje de Éxito'] = df_hist['Porcentaje de Éxito'].astype(str).str.replace('%', '').astype(float)
+            
+            # Crear columnas de fecha para agrupación
+            df_hist['Fecha Real'] = pd.to_datetime(df_hist['Fecha de Registro'])
+            df_hist['Semana'] = df_hist['Fecha Real'].dt.strftime('%G-Semana %V')
+            df_hist['Mes'] = df_hist['Fecha Real'].dt.strftime('%Y-%m')
+            
+            tab_diario, tab_semanal, tab_mensual = st.tabs(["📆 Resumen Diario", "🗓️ Resumen Semanal", "📊 Resumen Mensual"])
+            
+            with tab_diario:
+                df_hist_sorted = df_hist.sort_values(by="Fecha Real")
+                
+                # Gráfico Evolutivo
+                fig_d = px.line(df_hist_sorted, x=df_hist_sorted.index, y="Porcentaje de Éxito", 
+                                markers=True, title="Evolución Diaria del KPI (%)", template="plotly_dark")
+                fig_d.update_traces(line_color="#00AA50", marker=dict(size=10))
+                st.plotly_chart(fig_d, use_container_width=True)
+                
+                st.markdown("#### Archivo Estático por Día (Clic para expandir)")
+                
+                for date_str, row in df_hist.sort_values(by="Fecha Real", ascending=False).iterrows():
+                    with st.expander(f"📦 {date_str} - KPI Final: {row['Porcentaje de Éxito']}% (Cerrado por: {row.get('Auditor Responsable', 'Admin')})"):
+                        html_str = f"""
+                        <div style="display:flex; gap:10px; justify-content:space-between; margin-bottom:10px;">
+                            <div class='metric-box' style='flex:1; border-bottom-color:#8D99AE; min-height:80px; padding:10px;'>
+                                <span class='metric-title' style='font-size:10px;'>Total Procesados</span>
+                                <span class='metric-value' style='font-size:22px;'>{row["Total Procesados"]}</span>
+                            </div>
+                            <div class='metric-box' style='flex:1; border-bottom-color:#06D6A0; min-height:80px; padding:10px;'>
+                                <span class='metric-title' style='font-size:10px;'>En Ruta</span>
+                                <span class='metric-value' style='font-size:22px; color:#06D6A0;'>{row["Bultos en Ruta"]}</span>
+                            </div>
+                            <div class='metric-box' style='flex:1; border-bottom-color:#00AA50; min-height:80px; padding:10px;'>
+                                <span class='metric-title' style='font-size:10px;'>Compromisos (Meta)</span>
+                                <span class='metric-value' style='font-size:22px; color:#00AA50;'>{row["Total Compromisos"]}</span>
+                            </div>
+                            <div class='metric-box' style='flex:1; border-bottom-color:#E63946; min-height:80px; padding:10px;'>
+                                <span class='metric-title' style='font-size:10px;'>Fallando (Stat 44)</span>
+                                <span class='metric-value' style='font-size:22px; color:#E63946;'>{row["Fallando Compromiso"]}</span>
+                            </div>
+                        </div>
+                        """
+                        st.markdown(html_str, unsafe_allow_html=True)
+            
+            with tab_semanal:
+                # Agrupar sumando bultos para matemática perfecta
+                df_sem = df_hist.groupby('Semana').agg({
+                    'Total Compromisos': 'sum',
+                    'Fallando Compromiso': 'sum'
+                }).reset_index()
+                
+                # Fórmula Matemática: 100 - ((Fallando / Total)*100)
+                df_sem['KPI Semanal (%)'] = np.where(df_sem['Total Compromisos'] > 0, 
+                                            round(100 - (df_sem['Fallando Compromiso'] / df_sem['Total Compromisos'] * 100), 1), 0)
+                
+                fig_s = px.bar(df_sem, x='Semana', y='KPI Semanal (%)', text='KPI Semanal (%)',
+                               title="Rendimiento de Estación por Semana", template="plotly_dark", color_discrete_sequence=["#4D148C"])
+                st.plotly_chart(fig_s, use_container_width=True)
+                
+            with tab_mensual:
+                # Agrupar sumando bultos
+                df_mes = df_hist.groupby('Mes').agg({
+                    'Total Compromisos': 'sum',
+                    'Fallando Compromiso': 'sum'
+                }).reset_index()
+                
+                df_mes['KPI Mensual (%)'] = np.where(df_mes['Total Compromisos'] > 0, 
+                                            round(100 - (df_mes['Fallando Compromiso'] / df_mes['Total Compromisos'] * 100), 1), 0)
+                
+                fig_m = px.bar(df_mes, x='Mes', y='KPI Mensual (%)', text='KPI Mensual (%)',
+                               title="Rendimiento de Estación por Mes", template="plotly_dark", color_discrete_sequence=["#FF6600"])
+                st.plotly_chart(fig_m, use_container_width=True)
+
         else:
-            st.info("Aún no se han registrado cierres de día en la base de datos histórica. Cuando el administrador cierre el turno, aparecerá aquí.")
+            st.info("Aún no se han registrado cierres de día en la base de datos histórica.")
 
 else:
     st.info("👋 ¡Hola! Despliega el menú lateral y espera a que el servidor auto-cargue los reportes, o inicia sesión como Administrador para subir uno nuevo.")
