@@ -243,7 +243,7 @@ def color_fedex_cliente(row):
     color = ''
     if 'TRICOT' in fila_str: 
         color = 'background-color: #FF6600; color: white;'
-    elif any(c in fila_str for c in ['CRUZ VERDE', 'MAICAO', 'INTERCARRY', 'SOCOFAR', 'AHUMADA', 'FASA', 'MIGUEL TORRES']): 
+    elif any(c in fila_str for c in ['CRUZ VERDE', 'MAICAO', 'INTERCARRY', 'SOCOFAR', 'AHUMADA', 'FASA']): 
         color = 'background-color: #4D148C; color: white;'
         
     return [color] * len(row)
@@ -255,7 +255,7 @@ def clean_pdf_text(text):
 # 4. GENERADOR DE PDF 
 # ==============================================================================
 @st.cache_data(show_spinner=False)
-def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso):
+def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso, total_fallas_proceso=0):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
@@ -336,6 +336,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
         else:
             add_row(f"Ingreso Cliente {cli['nombre']}", cli['cantidad'], (245, 235, 255), (77, 20, 140))
             
+    add_row("Fallas de Proceso Operativo (SIN SIP / Errores 44-17)", total_fallas_proceso, (255, 200, 200), (255, 0, 0))
     add_row("Corregir Stat 44 y Aplazar (Fallando Compromiso)", corregir_total, (255, 230, 230), (200, 0, 0))
     
     def imprimir_cabecera_tabla_roja():
@@ -469,19 +470,19 @@ def mostrar_historial_kpi():
                     <div style="display:flex; gap:10px; justify-content:space-between; margin-bottom:10px;">
                         <div class='metric-box' style='flex:1; border-bottom-color:#8D99AE; min-height:80px; padding:10px;'>
                             <span class='metric-title' style='font-size:10px;'>Total Procesados</span>
-                            <span class='metric-value' style='font-size:22px;'>{row["Total Procesados"]}</span>
+                            <span class='metric-value' style='font-size:22px;'>{row.get("Total Procesados", 0)}</span>
                         </div>
                         <div class='metric-box' style='flex:1; border-bottom-color:#06D6A0; min-height:80px; padding:10px;'>
                             <span class='metric-title' style='font-size:10px;'>En Ruta</span>
-                            <span class='metric-value' style='font-size:22px; color:#06D6A0;'>{row["Bultos en Ruta"]}</span>
+                            <span class='metric-value' style='font-size:22px; color:#06D6A0;'>{row.get("Bultos en Ruta", 0)}</span>
                         </div>
                         <div class='metric-box' style='flex:1; border-bottom-color:#00AA50; min-height:80px; padding:10px;'>
                             <span class='metric-title' style='font-size:10px;'>Compromisos (Meta)</span>
-                            <span class='metric-value' style='font-size:22px; color:#00AA50;'>{row["Total Compromisos"]}</span>
+                            <span class='metric-value' style='font-size:22px; color:#00AA50;'>{row.get("Total Compromisos", 0)}</span>
                         </div>
                         <div class='metric-box' style='flex:1; border-bottom-color:#E63946; min-height:80px; padding:10px;'>
                             <span class='metric-title' style='font-size:10px;'>Fallando (Stat 44)</span>
-                            <span class='metric-value' style='font-size:22px; color:#E63946;'>{row["Fallando Compromiso"]}</span>
+                            <span class='metric-value' style='font-size:22px; color:#E63946;'>{row.get("Fallando Compromiso", 0)}</span>
                         </div>
                     </div>
                     '''
@@ -559,12 +560,56 @@ if st.session_state["history"]:
     m_en_ruta = len(df_en_ruta)
     
     # -------------------------------------------------------------------------
+    # IDENTIFICACIÓN DE FALLAS DE PROCESO (SIN SIP, 44/17 INCOMPLETOS)
+    # -------------------------------------------------------------------------
+    # Extraemos variables de interés manejando columnas opcionales
+    def check_col(df, col_name, substr=None):
+        if col_name not in df.columns: return pd.Series(False, index=df.index)
+        if substr: return df[col_name].astype(str).str.contains(substr, regex=True, na=False)
+        return df[col_name].notna() & (df[col_name].astype(str).str.strip() != "")
+
+    # Buscamos columnas de SIP
+    has_sip = pd.Series(False, index=df_vapa.index)
+    if 'SIPS Date Time Loc Latest' in df_vapa.columns:
+        has_sip = has_sip | df_vapa['SIPS Date Time Loc Latest'].notna()
+    elif 'SIP All' in df_vapa.columns:
+        has_sip = has_sip | df_vapa['SIP All'].notna()
+        
+    has_van = check_col(df_vapa, 'VAN All')
+    has_pod = check_col(df_vapa, 'POD All')
+    
+    # Stat 44 vs DEX 17
+    has_44 = check_col(df_vapa, 'STAT 44 Date Time Latest')
+    has_17 = check_col(df_vapa, 'DEX All', r'DEX\[17\]|DEX 17')
+
+    # Regla 1: Tiene VAN o POD, pero NO tiene SIP
+    falla_sin_sip = (~has_sip) & (has_van | has_pod)
+
+    # Regla 2: Tiene solo 44 o solo 17, sin tener VAN ni POD (incompleto en estación)
+    falla_44_17_incompleta = ((has_44 & ~has_17) | (has_17 & ~has_44)) & ~(has_van | has_pod)
+
+    # Combinamos fallas de proceso
+    filtro_fallas_proceso = falla_sin_sip | falla_44_17_incompleta
+    df_fallas_proceso = df_vapa[filtro_fallas_proceso].copy()
+    
+    if not df_fallas_proceso.empty:
+        # Añadimos etiqueta para visualizar de qué tipo de falla se trata
+        df_fallas_proceso['Motivo de Falla'] = np.where(
+            (~has_sip) & (has_van | has_pod), 'Salió a ruta sin SIP',
+            np.where(
+                has_44 & ~has_17, 'Falta DEX 17 (Tiene STAT 44)',
+                'Falta STAT 44 (Tiene DEX 17)'
+            )
+        )
+    total_fallas_proceso = len(df_fallas_proceso)
+
+    # -------------------------------------------------------------------------
     # EXCLUSIÓN DE DEX 16 Y LÓGICA DE JUSTIFICACIONES ADMIN
     # -------------------------------------------------------------------------
-    has_stat = pd.Series(False, index=df_bodega.index)
+    has_stat_bodega = pd.Series(False, index=df_bodega.index)
     for stat_col in ['STAT 44 Date Time Latest', 'STAT 50 Latest', 'STAT 53 All', 'STAT 37 Latest', 'STAT 27 Latest']:
         if stat_col in df_bodega.columns:
-            has_stat = has_stat | df_bodega[stat_col].notna()
+            has_stat_bodega = has_stat_bodega | df_bodega[stat_col].notna()
 
     has_dex_excl = pd.Series(False, index=df_bodega.index)
     if 'DEX All' in df_bodega.columns:
@@ -576,7 +621,7 @@ if st.session_state["history"]:
     if 'Tracking Number' in df_bodega.columns:
         is_justified_admin = clean_trk_bodega.isin(justificados_validos)
 
-    df_corregir = df_bodega[~has_stat & ~has_dex_excl & ~is_justified_admin]
+    df_corregir = df_bodega[~has_stat_bodega & ~has_dex_excl & ~is_justified_admin]
     corregir_44_aplazar_total = len(df_corregir)
     
     if 'Commit Date' in df_vapa.columns:
@@ -665,15 +710,14 @@ if st.session_state["history"]:
         tricot_count = filas_unidas.str.contains('TRICOT', na=False).sum()
         socofar_count = filas_unidas.str.contains('CRUZ VERDE|MAICAO|INTERCARRY|SOCOFAR', na=False).sum()
         fasa_count = filas_unidas.str.contains('AHUMADA|FASA', na=False).sum()
-        miguel_count = filas_unidas.str.contains('MIGUEL TORRES', na=False).sum()
+        # Miguel Torres ha sido removido
     else:
-        tricot_count, socofar_count, fasa_count, miguel_count = 0, 0, 0, 0
+        tricot_count, socofar_count, fasa_count = 0, 0, 0
 
     clientes = [
         {"nombre": "Tricot", "cantidad": tricot_count, "color": "#FF6600"},
         {"nombre": "SOCOFAR", "cantidad": socofar_count, "color": "#4D148C"},
-        {"nombre": "FASA", "cantidad": fasa_count, "color": "#4D148C"},
-        {"nombre": "Miguel Torres", "cantidad": miguel_count, "color": "#4D148C"}
+        {"nombre": "FASA", "cantidad": fasa_count, "color": "#4D148C"}
     ]
     clientes_ordenados = sorted(clientes, key=lambda x: x["cantidad"], reverse=True)
 
@@ -723,8 +767,8 @@ if st.session_state["history"]:
     metricas_operativas = [
         {"nombre": "STAT 50", "cantidad": m_50, "df": df_50, "color": "#FF6600"},
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
-        {"nombre": "Solo STAT 44", "cantidad": m_44, "df": df_44, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
+        {"nombre": "Fallas de Proceso Operativo", "cantidad": total_fallas_proceso, "df": df_fallas_proceso, "color": "#FF2B2B"},
         {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"}
     ]
     
@@ -753,7 +797,8 @@ if st.session_state["history"]:
                         corregir_total=corregir_44_aplazar_total, 
                         en_ruta=m_en_ruta,   
                         df_criticos=df_corregir,
-                        total_compromiso=total_compromiso_hoy
+                        total_compromiso=total_compromiso_hoy,
+                        total_fallas_proceso=total_fallas_proceso
                     )
                     st.download_button(
                         label="📄 Descargar Reporte PDF",
@@ -772,6 +817,8 @@ if st.session_state["history"]:
                 with st.expander("👁️ Ver"): 
                     if m['cantidad'] > 0: 
                         cols_validas = [c for c in cols_to_show if c in m['df'].columns]
+                        if "Motivo de Falla" in m['df'].columns:
+                            cols_validas.insert(0, "Motivo de Falla")
                         st.dataframe(m['df'][cols_validas].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
                     else: 
                         st.write("Vacío")
@@ -888,7 +935,7 @@ if st.session_state["history"]:
                 todos_justificados = [str(k).strip() for k in st.session_state["justificaciones_admin"].keys()]
                 is_any_justified = clean_trk_bodega.isin(todos_justificados)
                 
-                df_fallando_base = df_bodega[~has_stat & ~has_dex_excl & ~is_any_justified].dropna(subset=['Tracking Number']).copy()
+                df_fallando_base = df_bodega[~has_stat_bodega & ~has_dex_excl & ~is_any_justified].dropna(subset=['Tracking Number']).copy()
                 
                 if df_fallando_base.empty:
                     st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación en la base actual.")
