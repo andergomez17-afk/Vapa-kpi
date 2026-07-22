@@ -229,7 +229,15 @@ with col_salir:
 st.divider()
 
 def extraer_chofer(row):
-    texto = str(row.get('VAN All', '')) + " " + str(row.get('POD All', '')) + " " + str(row.get('DEX All', '')) + " " + str(row.get('STAT 44 Date Time Latest', ''))
+    has_van = pd.notna(row.get('VAN All')) and str(row.get('VAN All')).strip() != ""
+    has_pod = pd.notna(row.get('POD All')) and str(row.get('POD All')).strip() != ""
+    has_44 = pd.notna(row.get('STAT 44 Date Time Latest')) and str(row.get('STAT 44 Date Time Latest')).strip() != ""
+    has_17 = pd.notna(row.get('DEX All')) and '17' in str(row.get('DEX All'))
+
+    if not has_van and not has_pod and (has_44 or has_17):
+        return "En Estación"
+
+    texto = str(row.get('VAN All', '')) + " " + str(row.get('POD All', '')) + " " + str(row.get('DEX All', ''))
     coincidencias = re.findall(r'(\d{6,7})', texto)
     for c in coincidencias:
         if c in COURIERS:
@@ -313,7 +321,7 @@ def clean_pdf_text(text):
 # 4. GENERADOR DE PDF 
 # ==============================================================================
 @st.cache_data(show_spinner=False)
-def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso, m_sin_sip=0, m_44_sin_17=0, m_17_sin_44=0):
+def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso, m_sin_sip=0, m_44_estacion=0, m_pod_sin_van=0):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
@@ -396,8 +404,8 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
             
     # Nuevas estadísticas de Fallas
     add_row("Fallas: Salió a Ruta SIN SIP", m_sin_sip, (255, 200, 200), (255, 0, 0))
-    add_row("Fallas: Faltó DEX 17 (Tiene 44)", m_44_sin_17, (255, 215, 200), (220, 60, 0))
-    add_row("Fallas: Faltó STAT 44 (Tiene 17)", m_17_sin_44, (255, 215, 200), (220, 60, 0))
+    add_row("Fallas: Tiene POD pero faltó VAN", m_pod_sin_van, (255, 215, 200), (220, 60, 0))
+    add_row("Fallas: Solo STAT 44 en Estación (Hoy)", m_44_estacion, (255, 215, 200), (220, 60, 0))
     add_row("Corregir Stat 44 y Aplazar (Fallando Compromiso)", corregir_total, (255, 230, 230), (200, 0, 0))
     
     def imprimir_cabecera_tabla_roja():
@@ -450,7 +458,7 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
         with open(tmp.name, "rb") as f:
             return f.read()
 
-def generar_pdf_sin_sip(df_sin_sip):
+def generar_pdf_falla(df_falla, titulo_pdf, sort_by_chofer=False):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -461,14 +469,14 @@ def generar_pdf_sin_sip(df_sin_sip):
     pdf.set_y(8)
     pdf.set_font("Arial", 'B', 16)
     pdf.set_text_color(255, 255, 255)
-    pdf.cell(0, 10, txt="REPORTE DE BULTOS SIN SIP", ln=True, align='C')
+    pdf.cell(0, 10, txt=titulo_pdf, ln=True, align='C')
     
     pdf.set_y(35)
     pdf.set_font("Arial", 'B', 10)
     pdf.set_text_color(0, 0, 0)
     fecha_str = datetime.now().strftime('%d-%m-%Y %H:%M')
     pdf.cell(0, 8, txt=f"FECHA DE EMISION: {fecha_str}", ln=True)
-    pdf.cell(0, 8, txt=f"TOTAL BULTOS: {len(df_sin_sip)}", ln=True)
+    pdf.cell(0, 8, txt=f"TOTAL BULTOS: {len(df_falla)}", ln=True)
     pdf.ln(5)
     
     def imprimir_cabecera():
@@ -485,7 +493,11 @@ def generar_pdf_sin_sip(df_sin_sip):
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("Arial", '', 7)
     
-    for _, row in df_sin_sip.iterrows():
+    df_imprimir = df_falla.copy()
+    if sort_by_chofer and 'Chofer Asignado' in df_imprimir.columns:
+        df_imprimir = df_imprimir.sort_values(by='Chofer Asignado')
+        
+    for _, row in df_imprimir.iterrows():
         trk = clean_pdf_text(row.get('Tracking Number', 'N/A'))[:15]
         chofer = clean_pdf_text(row.get('Chofer Asignado', 'Desconocido'))[:20]
         shp = clean_pdf_text(row.get('Shipper Company', row.get('Shipper Name', 'N/A')))[:25]
@@ -678,7 +690,7 @@ if st.session_state["history"]:
     m_en_ruta = len(df_en_ruta)
     
     # -------------------------------------------------------------------------
-    # IDENTIFICACIÓN DE FALLAS DE PROCESO (SIN SIP, 44/17 INCOMPLETOS)
+    # IDENTIFICACIÓN DE FALLAS DE PROCESO Y BÚSQUEDA DE FECHAS
     # -------------------------------------------------------------------------
     def check_col(df, col_name, substr=None):
         if col_name not in df.columns: return pd.Series(False, index=df.index)
@@ -694,27 +706,38 @@ if st.session_state["history"]:
     has_van = check_col(df_vapa, 'VAN All')
     has_pod = check_col(df_vapa, 'POD All')
     
+    # Validación de Fecha para STAT 44 hoy: "dia mes año pegado" ej. 22072026
+    fecha_hoy_pegada = datetime.now().strftime("%d%m%Y")
     has_44 = check_col(df_vapa, 'STAT 44 Date Time Latest')
-    has_17 = check_col(df_vapa, 'DEX All', r'DEX\[17\]|DEX 17')
+    has_44_hoy = has_44 & df_vapa['STAT 44 Date Time Latest'].astype(str).str.contains(fecha_hoy_pegada, regex=False, na=False)
 
-    # Regla 1: Tiene VAN o POD, pero NO tiene SIP
-    falla_sin_sip = (~has_sip) & (has_van | has_pod)
+    # Regla 1: SIN SIP (Salió a ruta o está en estación con 44)
+    falla_sin_sip = (~has_sip) & (has_van | has_pod | has_44_hoy)
     df_sin_sip = df_vapa[falla_sin_sip].copy()
-    if not df_sin_sip.empty: df_sin_sip['Motivo de Falla'] = 'Salió a ruta sin SIP'
+    
+    def estado_sin_sip_format(row):
+        v = pd.notna(row.get('VAN All')) and str(row.get('VAN All')).strip() != ""
+        p = pd.notna(row.get('POD All')) and str(row.get('POD All')).strip() != ""
+        if p: return "Tiene POD"
+        if v: return "Solo VAN"
+        return "En Bodega"
+
+    if not df_sin_sip.empty: 
+        df_sin_sip['Motivo de Falla'] = 'Falta SIP'
+        df_sin_sip['Status'] = df_sin_sip.apply(estado_sin_sip_format, axis=1)
     m_sin_sip = len(df_sin_sip)
 
-    # Regla 2 y 3: Incompletos en estación (44 sin 17, 17 sin 44)
-    # Tienen que estar en estación (sin van ni pod)
-    filtro_44_sin_17 = has_44 & ~has_17 & ~(has_van | has_pod)
-    filtro_17_sin_44 = has_17 & ~has_44 & ~(has_van | has_pod)
-    
-    df_44_sin_17 = df_vapa[filtro_44_sin_17].copy()
-    if not df_44_sin_17.empty: df_44_sin_17['Motivo de Falla'] = 'Falta DEX 17 (Tiene STAT 44)'
-    m_44_sin_17 = len(df_44_sin_17)
+    # Regla 2: POD sin VAN
+    falla_pod_sin_van = has_pod & ~has_van
+    df_pod_sin_van = df_vapa[falla_pod_sin_van].copy()
+    if not df_pod_sin_van.empty: df_pod_sin_van['Motivo de Falla'] = 'Tiene POD sin VAN'
+    m_pod_sin_van = len(df_pod_sin_van)
 
-    df_17_sin_44 = df_vapa[filtro_17_sin_44].copy()
-    if not df_17_sin_44.empty: df_17_sin_44['Motivo de Falla'] = 'Falta STAT 44 (Tiene DEX 17)'
-    m_17_sin_44 = len(df_17_sin_44)
+    # Regla 3: Solo STAT 44 aplicado HOY y en estación (Sin Van/Pod)
+    filtro_44_estacion = has_44_hoy & ~(has_van | has_pod)
+    df_44_estacion = df_vapa[filtro_44_estacion].copy()
+    if not df_44_estacion.empty: df_44_estacion['Motivo de Falla'] = 'Solo STAT 44 en Estación (Hoy)'
+    m_44_estacion = len(df_44_estacion)
 
     # -------------------------------------------------------------------------
     # EXCLUSIÓN DE DEX 16 Y LÓGICA DE JUSTIFICACIONES ADMIN
@@ -838,6 +861,7 @@ if st.session_state["history"]:
     with c_metrics:
         st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#8D99AE;'><span class='metric-title' style='font-size:11px;'>1. Total Llegaron Hoy</span><span class='metric-value' style='font-size:20px;'>{total_ingreso}</span></div>", unsafe_allow_html=True)
         st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#06D6A0;'><span class='metric-title' style='font-size:11px;'>2. En Ruta (VAN)</span><span class='metric-value' style='font-size:20px; color:#06D6A0;'>{m_en_ruta}</span></div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:#FF2B2B;'><span class='metric-title' style='font-size:11px;'>🚨 Salió a Ruta SIN SIP</span><span class='metric-value' style='font-size:20px; color:#FF2B2B;'>{m_sin_sip}</span></div>", unsafe_allow_html=True)
         
         for cli in clientes_ordenados:
             st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:{cli['color']};'><span class='metric-title' style='font-size:11px;'>{cli['nombre']}</span><span class='metric-value' style='font-size:20px; color:{cli['color']};'>{cli['cantidad']}</span></div>", unsafe_allow_html=True)
@@ -873,8 +897,8 @@ if st.session_state["history"]:
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
         {"nombre": "Falla: Salió a Ruta SIN SIP", "cantidad": m_sin_sip, "df": df_sin_sip, "color": "#FF2B2B"},
-        {"nombre": "Falla: Falta DEX 17 (Tiene 44)", "cantidad": m_44_sin_17, "df": df_44_sin_17, "color": "#D35400"},
-        {"nombre": "Falla: Falta STAT 44 (Tiene 17)", "cantidad": m_17_sin_44, "df": df_17_sin_44, "color": "#D35400"},
+        {"nombre": "Falla: Tiene POD pero faltó VAN", "cantidad": m_pod_sin_van, "df": df_pod_sin_van, "color": "#D35400"},
+        {"nombre": "Falla: Solo STAT 44 en Estación (Hoy)", "cantidad": m_44_estacion, "df": df_44_estacion, "color": "#D35400"},
         {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"}
     ]
     
@@ -888,9 +912,9 @@ if st.session_state["history"]:
         if HAS_FPDF:
             with st.container():
                 st.markdown("<div style='background-color: #1E1E1E; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #FF6600;'>", unsafe_allow_html=True)
-                col_pdf1, col_pdf2, col_pdf3 = st.columns([1, 1, 1])
+                col_pdf1, col_pdf2, col_pdf3, col_pdf4 = st.columns([1, 1, 1, 1])
                 with col_pdf1:
-                    auditor_name = st.text_input("👤 Nombre del Supervisor/Auditor (Opcional):", placeholder="Ej. Juan Pérez")
+                    auditor_name = st.text_input("👤 Nombre del Supervisor/Auditor:", placeholder="Ej. Juan Pérez")
                 with col_pdf2:
                     st.write("") 
                     st.write("") 
@@ -905,8 +929,8 @@ if st.session_state["history"]:
                         df_criticos=df_corregir,
                         total_compromiso=total_compromiso_hoy,
                         m_sin_sip=m_sin_sip,
-                        m_44_sin_17=m_44_sin_17,
-                        m_17_sin_44=m_17_sin_44
+                        m_44_estacion=m_44_estacion,
+                        m_pod_sin_van=m_pod_sin_van
                     )
                     st.download_button(
                         label="📄 Descargar Reporte General",
@@ -919,7 +943,7 @@ if st.session_state["history"]:
                     st.write("")
                     st.write("")
                     if m_sin_sip > 0:
-                        pdf_bytes_sinsip = generar_pdf_sin_sip(df_sin_sip)
+                        pdf_bytes_sinsip = generar_pdf_falla(df_sin_sip, "REPORTE DE BULTOS SIN SIP", sort_by_chofer=False)
                         st.download_button(
                             label="🚨 Descargar Bultos SIN SIP",
                             data=pdf_bytes_sinsip,
@@ -930,6 +954,21 @@ if st.session_state["history"]:
                         )
                     else:
                         st.button("✅ No hay Fallas SIP", disabled=True, use_container_width=True)
+                with col_pdf4:
+                    st.write("")
+                    st.write("")
+                    if m_pod_sin_van > 0:
+                        pdf_bytes_pod_sv = generar_pdf_falla(df_pod_sin_van, "REPORTE DE BULTOS CON POD SIN VAN", sort_by_chofer=True)
+                        st.download_button(
+                            label="📥 Descargar POD Sin VAN",
+                            data=pdf_bytes_pod_sv,
+                            file_name=f"Falla_POD_SIN_VAN_{fecha_actual_str}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                            type="primary"
+                        )
+                    else:
+                        st.button("✅ No hay POD sin VAN", disabled=True, use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
         
         # Mostrar métricas ordenadas
