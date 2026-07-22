@@ -7,6 +7,7 @@ import tempfile
 import json
 import os
 import gc
+import re
 
 # Intentar importar la librería para PDF
 try:
@@ -21,6 +22,52 @@ except ImportError:
 DB_FILE = "vapa_db.json"
 CIERRES_FILE = "vapa_cierres.json"
 UPLOAD_DIR = "vapa_uploads" # <--- CARPETA DEL SERVIDOR PARA EXCEL
+
+COURIERS = {
+    "3890427": "Brian Tapia",
+    "4619213": "Alex Duran Rodriguez",
+    "3635830": "Alexis Morales Concha",
+    "6067748": "Bairon Cartagena Aros",
+    "4031450": "Brian Soto",
+    "4279994": "Carlos Benitez Romero",
+    "3635949": "Carlos Gonzalez Castillo",
+    "3635847": "Cristian Orellana Maldonado",
+    "6042231": "Gonzalo Rojas Valladares",
+    "3635697": "Ignacio Azua Rubina",
+    "4211394": "Ivar Grau",
+    "5485577": "Jonathan Oliva Venegas",
+    "4315829": "Williams Aravena Fuentes",
+    "3635722": "Andres Bustamante Silva",
+    "3635779": "Claudio Gonzalez Alfaro",
+    "6067729": "Diego Muñoz Cordova",
+    "3635910": "Diego Silvera Saucedo",
+    "4152331": "Federico Araneda",
+    "4393060": "Jean Olate Aedo",
+    "3635956": "Juan Soto Torrealba",
+    "4273766": "Matias Del Bel",
+    "4285050": "Michael Sepulveda Mateluna",
+    "4031455": "Patricia Serrano",
+    "3635943": "Quesny Cherenfant",
+    "4396439": "Rodrigo Garcia Andrade",
+    "3836119": "Salvador Frez Inostroza",
+    "945447": "Mario Duarte",
+    "5710691": "Adriasola",
+    "6723307": "alexon Caicedo",
+    "6269974": "Claudio Tapia",
+    "6753631": "Daniel Ibañez",
+    "5710643": "Enor Caicedo",
+    "6568275": "Fabian Perez",
+    "6269970": "Jose Caicedo",
+    "6269972": "Julio Lobos",
+    "6568276": "Raul Ceballos",
+    "9836295": "Javier Gana",
+    "9711646": "Williams Piña",
+    "9601562": "Yeison Gonzalez",
+    "9789500": "Jose Gutierrez",
+    "9762038": "Carlos Soto",
+    "1019905": "Patricio Troncoso",
+    "2588350": "Luis pinto"
+}
 
 # Crear carpeta de subidas si no existe
 if not os.path.exists(UPLOAD_DIR):
@@ -181,6 +228,14 @@ with col_salir:
 
 st.divider()
 
+def extraer_chofer(row):
+    texto = str(row.get('VAN All', '')) + " " + str(row.get('POD All', '')) + " " + str(row.get('DEX All', '')) + " " + str(row.get('STAT 44 Date Time Latest', ''))
+    coincidencias = re.findall(r'(\d{6,7})', texto)
+    for c in coincidencias:
+        if c in COURIERS:
+            return COURIERS[c]
+    return "No Identificado"
+
 class VapaEngine:
     @staticmethod
     def process_file_data(df):
@@ -207,10 +262,13 @@ class VapaEngine:
         if 'Tracking Number' in df_vapa.columns:
             df_vapa['Acción Admin'] = df_vapa['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('estado', 'N/A'))
             df_vapa['Ruta Asignada'] = df_vapa['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('ruta', ''))
+            # Asignamos Chofer basado en el texto del escaneo
+            df_vapa['Chofer Asignado'] = df_vapa.apply(extraer_chofer, axis=1)
         
         if 'Tracking Number' in df_bodega.columns:
             df_bodega['Acción Admin'] = df_bodega['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('estado', 'N/A'))
             df_bodega['Ruta Asignada'] = df_bodega['Tracking Number'].map(lambda x: dict_admin.get(x, {}).get('ruta', ''))
+            df_bodega['Chofer Asignado'] = df_bodega.apply(extraer_chofer, axis=1)
         
         return df_vapa, df_bodega
 
@@ -255,7 +313,7 @@ def clean_pdf_text(text):
 # 4. GENERADOR DE PDF 
 # ==============================================================================
 @st.cache_data(show_spinner=False)
-def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso, total_fallas_proceso=0):
+def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir_total, en_ruta, df_criticos, total_compromiso, m_sin_sip=0, m_44_sin_17=0, m_17_sin_44=0):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=False)
     pdf.add_page()
@@ -336,7 +394,10 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
         else:
             add_row(f"Ingreso Cliente {cli['nombre']}", cli['cantidad'], (245, 235, 255), (77, 20, 140))
             
-    add_row("Fallas de Proceso Operativo (SIN SIP / Errores 44-17)", total_fallas_proceso, (255, 200, 200), (255, 0, 0))
+    # Nuevas estadísticas de Fallas
+    add_row("Fallas: Salió a Ruta SIN SIP", m_sin_sip, (255, 200, 200), (255, 0, 0))
+    add_row("Fallas: Faltó DEX 17 (Tiene 44)", m_44_sin_17, (255, 215, 200), (220, 60, 0))
+    add_row("Fallas: Faltó STAT 44 (Tiene 17)", m_17_sin_44, (255, 215, 200), (220, 60, 0))
     add_row("Corregir Stat 44 y Aplazar (Fallando Compromiso)", corregir_total, (255, 230, 230), (200, 0, 0))
     
     def imprimir_cabecera_tabla_roja():
@@ -389,6 +450,59 @@ def generar_pdf_avanzado(fecha_str, auditor, total, clientes_ordenados, corregir
         with open(tmp.name, "rb") as f:
             return f.read()
 
+def generar_pdf_sin_sip(df_sin_sip):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    
+    pdf.set_fill_color(77, 20, 140) 
+    pdf.rect(0, 0, 210, 25, 'F')
+    
+    pdf.set_y(8)
+    pdf.set_font("Arial", 'B', 16)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 10, txt="REPORTE DE BULTOS SIN SIP", ln=True, align='C')
+    
+    pdf.set_y(35)
+    pdf.set_font("Arial", 'B', 10)
+    pdf.set_text_color(0, 0, 0)
+    fecha_str = datetime.now().strftime('%d-%m-%Y %H:%M')
+    pdf.cell(0, 8, txt=f"FECHA DE EMISION: {fecha_str}", ln=True)
+    pdf.cell(0, 8, txt=f"TOTAL BULTOS: {len(df_sin_sip)}", ln=True)
+    pdf.ln(5)
+    
+    def imprimir_cabecera():
+        pdf.set_fill_color(255, 0, 0)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Arial", 'B', 8)
+        pdf.cell(30, 8, txt="Tracking", border=1, fill=True)
+        pdf.cell(40, 8, txt="Chofer", border=1, fill=True)
+        pdf.cell(45, 8, txt="Cliente", border=1, fill=True)
+        pdf.cell(20, 8, txt="Estado", border=1, fill=True)
+        pdf.cell(55, 8, txt="Direccion", border=1, fill=True, ln=True)
+    
+    imprimir_cabecera()
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Arial", '', 7)
+    
+    for _, row in df_sin_sip.iterrows():
+        trk = clean_pdf_text(row.get('Tracking Number', 'N/A'))[:15]
+        chofer = clean_pdf_text(row.get('Chofer Asignado', 'Desconocido'))[:20]
+        shp = clean_pdf_text(row.get('Shipper Company', row.get('Shipper Name', 'N/A')))[:25]
+        estado = clean_pdf_text(row.get('Status', row.get('status', 'N/A')))[:10]
+        direccion = clean_pdf_text(row.get('CE Recp Address All', 'N/A'))[:35]
+        
+        pdf.cell(30, 6, txt=trk, border=1)
+        pdf.cell(40, 6, txt=chofer, border=1)
+        pdf.cell(45, 6, txt=shp, border=1)
+        pdf.cell(20, 6, txt=estado, border=1)
+        pdf.cell(55, 6, txt=direccion, border=1, ln=True)
+        
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        pdf.output(tmp.name)
+        with open(tmp.name, "rb") as f:
+            return f.read()
+
 # ==============================================================================
 # 5. BARRA LATERAL (CON PROTECCIÓN DE FINES DE SEMANA)
 # ==============================================================================
@@ -425,7 +539,7 @@ else:
     st.sidebar.info("📂 Estás operando en modo lectura. Los reportes DREUI han sido cargados por el Administrador desde el servidor central.")
 
 # ==============================================================================
-# 6. MÓDULO DE HISTORIAL GERENCIAL (Gráficos unificados y sin fin de semana)
+# 6. MÓDULO DE HISTORIAL GERENCIAL
 # ==============================================================================
 def mostrar_historial_kpi():
     st.markdown("### 📅 Historial y Rendimiento de la Estación")
@@ -541,11 +655,15 @@ if st.session_state["history"]:
         clean_trk_vapa = df_vapa['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         df_vapa['Acción Admin'] = clean_trk_vapa.map(lambda x: just_dict.get(x, {}).get('estado', ''))
         df_vapa['Ruta Asignada'] = clean_trk_vapa.map(lambda x: just_dict.get(x, {}).get('ruta', ''))
+        if 'Chofer Asignado' not in df_vapa.columns:
+            df_vapa['Chofer Asignado'] = df_vapa.apply(extraer_chofer, axis=1)
     
     if 'Tracking Number' in df_bodega.columns:
         clean_trk_bodega = df_bodega['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
         df_bodega['Acción Admin'] = clean_trk_bodega.map(lambda x: just_dict.get(x, {}).get('estado', ''))
         df_bodega['Ruta Asignada'] = clean_trk_bodega.map(lambda x: just_dict.get(x, {}).get('ruta', ''))
+        if 'Chofer Asignado' not in df_bodega.columns:
+            df_bodega['Chofer Asignado'] = df_bodega.apply(extraer_chofer, axis=1)
     
     if "ver_fallos_kpi" not in st.session_state:
         st.session_state.ver_fallos_kpi = False
@@ -562,13 +680,11 @@ if st.session_state["history"]:
     # -------------------------------------------------------------------------
     # IDENTIFICACIÓN DE FALLAS DE PROCESO (SIN SIP, 44/17 INCOMPLETOS)
     # -------------------------------------------------------------------------
-    # Extraemos variables de interés manejando columnas opcionales
     def check_col(df, col_name, substr=None):
         if col_name not in df.columns: return pd.Series(False, index=df.index)
         if substr: return df[col_name].astype(str).str.contains(substr, regex=True, na=False)
         return df[col_name].notna() & (df[col_name].astype(str).str.strip() != "")
 
-    # Buscamos columnas de SIP
     has_sip = pd.Series(False, index=df_vapa.index)
     if 'SIPS Date Time Loc Latest' in df_vapa.columns:
         has_sip = has_sip | df_vapa['SIPS Date Time Loc Latest'].notna()
@@ -578,31 +694,27 @@ if st.session_state["history"]:
     has_van = check_col(df_vapa, 'VAN All')
     has_pod = check_col(df_vapa, 'POD All')
     
-    # Stat 44 vs DEX 17
     has_44 = check_col(df_vapa, 'STAT 44 Date Time Latest')
     has_17 = check_col(df_vapa, 'DEX All', r'DEX\[17\]|DEX 17')
 
     # Regla 1: Tiene VAN o POD, pero NO tiene SIP
     falla_sin_sip = (~has_sip) & (has_van | has_pod)
+    df_sin_sip = df_vapa[falla_sin_sip].copy()
+    if not df_sin_sip.empty: df_sin_sip['Motivo de Falla'] = 'Salió a ruta sin SIP'
+    m_sin_sip = len(df_sin_sip)
 
-    # Regla 2: Tiene solo 44 o solo 17, sin tener VAN ni POD (incompleto en estación)
-    falla_44_17_incompleta = ((has_44 & ~has_17) | (has_17 & ~has_44)) & ~(has_van | has_pod)
-
-    # Combinamos fallas de proceso
-    filtro_fallas_proceso = falla_sin_sip | falla_44_17_incompleta
-    df_fallas_proceso = df_vapa[filtro_fallas_proceso].copy()
+    # Regla 2 y 3: Incompletos en estación (44 sin 17, 17 sin 44)
+    # Tienen que estar en estación (sin van ni pod)
+    filtro_44_sin_17 = has_44 & ~has_17 & ~(has_van | has_pod)
+    filtro_17_sin_44 = has_17 & ~has_44 & ~(has_van | has_pod)
     
-    if not df_fallas_proceso.empty:
-        # Añadimos etiqueta para visualizar de qué tipo de falla se trata
-        motivo_array = np.where(
-            (~has_sip) & (has_van | has_pod), 'Salió a ruta sin SIP',
-            np.where(
-                has_44 & ~has_17, 'Falta DEX 17 (Tiene STAT 44)',
-                'Falta STAT 44 (Tiene DEX 17)'
-            )
-        )
-        df_fallas_proceso['Motivo de Falla'] = motivo_array[filtro_fallas_proceso]
-    total_fallas_proceso = len(df_fallas_proceso)
+    df_44_sin_17 = df_vapa[filtro_44_sin_17].copy()
+    if not df_44_sin_17.empty: df_44_sin_17['Motivo de Falla'] = 'Falta DEX 17 (Tiene STAT 44)'
+    m_44_sin_17 = len(df_44_sin_17)
+
+    df_17_sin_44 = df_vapa[filtro_17_sin_44].copy()
+    if not df_17_sin_44.empty: df_17_sin_44['Motivo de Falla'] = 'Falta STAT 44 (Tiene DEX 17)'
+    m_17_sin_44 = len(df_17_sin_44)
 
     # -------------------------------------------------------------------------
     # EXCLUSIÓN DE DEX 16 Y LÓGICA DE JUSTIFICACIONES ADMIN
@@ -650,7 +762,7 @@ if st.session_state["history"]:
     else:
         pct_exito, pct_fallando = 0, 0
 
-    cols_to_check = ['Tracking Number', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Acción Admin', 'Ruta Asignada', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
+    cols_to_check = ['Tracking Number', 'Chofer Asignado', 'Shipper Company', 'Shipper Name', 'Recip City', 'CE Recp Address All', 'status', 'Status', 'Acción Admin', 'Ruta Asignada', 'Commit Date', 'SIPS Date Time Loc Latest', 'STAT 50 Latest', 'STAT 53 All', 'DEX All', 'Fecha de Carga']
     cols_to_show = list(dict.fromkeys(cols_to_check))
 
     # --- KPIs PRINCIPALES ---
@@ -711,7 +823,6 @@ if st.session_state["history"]:
         tricot_count = filas_unidas.str.contains('TRICOT', na=False).sum()
         socofar_count = filas_unidas.str.contains('CRUZ VERDE|MAICAO|INTERCARRY|SOCOFAR', na=False).sum()
         fasa_count = filas_unidas.str.contains('AHUMADA|FASA', na=False).sum()
-        # Miguel Torres ha sido removido
     else:
         tricot_count, socofar_count, fasa_count = 0, 0, 0
 
@@ -755,21 +866,15 @@ if st.session_state["history"]:
     df_50 = df_vapa[df_vapa['STAT 50 Latest'].notna()] if 'STAT 50 Latest' in df_vapa.columns else pd.DataFrame()
     df_53 = df_vapa[df_vapa['STAT 53 All'].notna()] if 'STAT 53 All' in df_vapa.columns else pd.DataFrame()
     
-    if 'STAT 44 Date Time Latest' in df_vapa.columns:
-        filtro_44 = df_vapa['STAT 44 Date Time Latest'].notna() & (df_vapa['VAN All'].isna() | (df_vapa['VAN All'].astype(str).str.strip() == ""))
-        if 'DEX All' in df_vapa.columns:
-            filtro_44 = filtro_44 & (~df_vapa['DEX All'].astype(str).str.contains(r'DEX\[17\]', na=False))
-        df_44 = df_vapa[filtro_44]
-    else:
-        df_44 = pd.DataFrame()
-        
-    m_50, m_53, m_44 = len(df_50), len(df_53), len(df_44)
+    m_50, m_53 = len(df_50), len(df_53)
     
     metricas_operativas = [
         {"nombre": "STAT 50", "cantidad": m_50, "df": df_50, "color": "#FF6600"},
         {"nombre": "STAT 53", "cantidad": m_53, "df": df_53, "color": "#FF6600"},
         {"nombre": "En Ruta", "cantidad": m_en_ruta, "df": df_en_ruta, "color": "#06D6A0"},
-        {"nombre": "Fallas de Proceso Operativo", "cantidad": total_fallas_proceso, "df": df_fallas_proceso, "color": "#FF2B2B"},
+        {"nombre": "Falla: Salió a Ruta SIN SIP", "cantidad": m_sin_sip, "df": df_sin_sip, "color": "#FF2B2B"},
+        {"nombre": "Falla: Falta DEX 17 (Tiene 44)", "cantidad": m_44_sin_17, "df": df_44_sin_17, "color": "#D35400"},
+        {"nombre": "Falla: Falta STAT 44 (Tiene 17)", "cantidad": m_17_sin_44, "df": df_17_sin_44, "color": "#D35400"},
         {"nombre": "Corregir Stat 44 y Aplazar", "cantidad": corregir_44_aplazar_total, "df": df_corregir, "color": "#E63946"}
     ]
     
@@ -783,14 +888,14 @@ if st.session_state["history"]:
         if HAS_FPDF:
             with st.container():
                 st.markdown("<div style='background-color: #1E1E1E; padding: 15px; border-radius: 10px; margin-bottom: 20px; border-left: 5px solid #FF6600;'>", unsafe_allow_html=True)
-                col_pdf1, col_pdf2 = st.columns([2, 1])
+                col_pdf1, col_pdf2, col_pdf3 = st.columns([1, 1, 1])
                 with col_pdf1:
                     auditor_name = st.text_input("👤 Nombre del Supervisor/Auditor (Opcional):", placeholder="Ej. Juan Pérez")
                 with col_pdf2:
                     st.write("") 
                     st.write("") 
                     fecha_actual_str = datetime.now().strftime('%d-%m-%Y')
-                    pdf_bytes = generar_pdf_avanzado(
+                    pdf_bytes_gral = generar_pdf_avanzado(
                         fecha_str=datetime.now().strftime('%d-%m-%Y %H:%M'),
                         auditor=auditor_name,
                         total=total_ingreso,
@@ -799,30 +904,51 @@ if st.session_state["history"]:
                         en_ruta=m_en_ruta,   
                         df_criticos=df_corregir,
                         total_compromiso=total_compromiso_hoy,
-                        total_fallas_proceso=total_fallas_proceso
+                        m_sin_sip=m_sin_sip,
+                        m_44_sin_17=m_44_sin_17,
+                        m_17_sin_44=m_17_sin_44
                     )
                     st.download_button(
-                        label="📄 Descargar Reporte PDF",
-                        data=pdf_bytes,
+                        label="📄 Descargar Reporte General",
+                        data=pdf_bytes_gral,
                         file_name=f"Reporte_Diario_{fecha_actual_str}.pdf",
                         mime="application/pdf",
                         use_container_width=True
                     )
+                with col_pdf3:
+                    st.write("")
+                    st.write("")
+                    if m_sin_sip > 0:
+                        pdf_bytes_sinsip = generar_pdf_sin_sip(df_sin_sip)
+                        st.download_button(
+                            label="🚨 Descargar Bultos SIN SIP",
+                            data=pdf_bytes_sinsip,
+                            file_name=f"Falla_SIN_SIP_{fecha_actual_str}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                            type="primary"
+                        )
+                    else:
+                        st.button("✅ No hay Fallas SIP", disabled=True, use_container_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
         
-        cols_metricas = st.columns(len(metricas_ordenadas))
-        for i, col in enumerate(cols_metricas):
-            m = metricas_ordenadas[i]
-            with col:
-                st.markdown(f"<div class='metric-box' style='border-bottom-color:{m['color']};'><span class='metric-title'>{m['nombre']}</span><span class='metric-value' style='color:{m['color']};'>{m['cantidad']}</span></div>", unsafe_allow_html=True)
-                with st.expander("👁️ Ver"): 
-                    if m['cantidad'] > 0: 
-                        cols_validas = [c for c in cols_to_show if c in m['df'].columns]
-                        if "Motivo de Falla" in m['df'].columns:
-                            cols_validas.insert(0, "Motivo de Falla")
-                        st.dataframe(m['df'][cols_validas].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
-                    else: 
-                        st.write("Vacío")
+        # Mostrar métricas ordenadas
+        cols_por_fila = 4
+        for i in range(0, len(metricas_ordenadas), cols_por_fila):
+            cols = st.columns(cols_por_fila)
+            for j in range(cols_por_fila):
+                if i + j < len(metricas_ordenadas):
+                    m = metricas_ordenadas[i + j]
+                    with cols[j]:
+                        st.markdown(f"<div class='metric-box' style='border-bottom-color:{m['color']};'><span class='metric-title'>{m['nombre']}</span><span class='metric-value' style='color:{m['color']};'>{m['cantidad']}</span></div>", unsafe_allow_html=True)
+                        with st.expander("👁️ Ver"): 
+                            if m['cantidad'] > 0: 
+                                cols_validas = [c for c in cols_to_show if c in m['df'].columns]
+                                if "Motivo de Falla" in m['df'].columns:
+                                    cols_validas.insert(0, "Motivo de Falla")
+                                st.dataframe(m['df'][cols_validas].style.apply(color_fedex_cliente, axis=1).hide(axis='index'), use_container_width=True)
+                            else: 
+                                st.write("Vacío")
 
         chart_data = pd.DataFrame({
             "Categoría": [m["nombre"] for m in metricas_ordenadas],
