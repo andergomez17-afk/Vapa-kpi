@@ -880,9 +880,9 @@ if st.session_state["history"]:
             st.markdown(f"<div class='metric-box' style='padding: 8px; margin-bottom: 5px; min-height: 0px; border-bottom-color:{cli['color']};'><span class='metric-title' style='font-size:11px;'>{cli['nombre']}</span><span class='metric-value' style='font-size:20px; color:{cli['color']};'>{cli['cantidad']}</span></div>", unsafe_allow_html=True)
 
     with c_chart:
-        cat_names = ["1. Llegaron Hoy", "2. En Ruta"] + [c["nombre"] for c in clientes_ordenados]
-        cat_counts = [total_ingreso, m_en_ruta] + [c["cantidad"] for c in clientes_ordenados]
-        cat_colors = ["#8D99AE", "#06D6A0"] + [c["color"] for c in clientes_ordenados]
+        cat_names = ["1. Llegaron Hoy", "2. En Ruta", "🚨 Ruta SIN SIP"] + [c["nombre"] for c in clientes_ordenados]
+        cat_counts = [total_ingreso, m_en_ruta, m_sin_sip] + [c["cantidad"] for c in clientes_ordenados]
+        cat_colors = ["#8D99AE", "#06D6A0", "#FF2B2B"] + [c["color"] for c in clientes_ordenados]
         
         df_ingreso = pd.DataFrame({"Categoría": cat_names, "Cantidad": cat_counts, "Color": cat_colors})
         
