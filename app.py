@@ -594,13 +594,14 @@ if st.session_state["history"]:
     
     if not df_fallas_proceso.empty:
         # Añadimos etiqueta para visualizar de qué tipo de falla se trata
-        df_fallas_proceso['Motivo de Falla'] = np.where(
+        motivo_array = np.where(
             (~has_sip) & (has_van | has_pod), 'Salió a ruta sin SIP',
             np.where(
                 has_44 & ~has_17, 'Falta DEX 17 (Tiene STAT 44)',
                 'Falta STAT 44 (Tiene DEX 17)'
             )
         )
+        df_fallas_proceso['Motivo de Falla'] = motivo_array[filtro_fallas_proceso]
     total_fallas_proceso = len(df_fallas_proceso)
 
     # -------------------------------------------------------------------------
