@@ -894,7 +894,7 @@ if st.session_state["history"]:
             plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
             dragmode=False
         )
-        fig_ingreso.update_xaxes(fixedrange=True)
+        fig_ingreso.update_xaxes(fixedrange=True, categoryorder='total descending')
         fig_ingreso.update_yaxes(fixedrange=True)
         st.plotly_chart(fig_ingreso, use_container_width=True, config={'displayModeBar': False})
 
