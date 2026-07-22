@@ -713,7 +713,7 @@ if st.session_state["history"]:
 
     # Regla 1: SIN SIP (Salió a ruta o está en estación con 44)
     falla_sin_sip = (~has_sip) & (has_van | has_pod | has_44_hoy)
-    df_sin_sip = df_vapa[falla_sin_sip].copy()
+    df_sin_sip_temp = df_vapa[falla_sin_sip].copy()
     
     def estado_sin_sip_format(row):
         v = pd.notna(row.get('VAN All')) and str(row.get('VAN All')).strip() != ""
@@ -722,24 +722,24 @@ if st.session_state["history"]:
         if v: return "Solo VAN"
         return "En Bodega"
 
-    if not df_sin_sip.empty: 
-        df_sin_sip['Motivo de Falla'] = 'Falta SIP'
-        df_sin_sip['Status'] = df_sin_sip.apply(estado_sin_sip_format, axis=1)
+    if not df_sin_sip_temp.empty: 
+        df_sin_sip_temp['Motivo de Falla'] = 'Falta SIP'
+        df_sin_sip_temp['Status'] = df_sin_sip_temp.apply(estado_sin_sip_format, axis=1)
+        # Ignorar si se escaneó internamente sin chofer (ej. punto de venta, of. interna)
+        df_sin_sip = df_sin_sip_temp[df_sin_sip_temp['Chofer Asignado'] != 'No Identificado'].copy()
+    else:
+        df_sin_sip = df_sin_sip_temp
+    
     m_sin_sip = len(df_sin_sip)
 
     # Regla 2: POD sin VAN
     falla_pod_sin_van = has_pod & ~has_van
     df_pod_sin_van_temp = df_vapa[falla_pod_sin_van].copy()
     
+    # Exclusión definitiva: Solo aquellos con un Chofer Identificado
     if not df_pod_sin_van_temp.empty:
-        texto_busqueda_pod = pd.Series("", index=df_pod_sin_van_temp.index)
-        for col in ['Shipper Company', 'Shipper Name', 'CE Recp Address All', 'Recip Company', 'Recip Name']:
-            if col in df_pod_sin_van_temp.columns:
-                texto_busqueda_pod += df_pod_sin_van_temp[col].fillna('').astype(str).str.upper() + " "
-        
-        exclusiones = r'OFICINA FEDEX|OF\. FEDEX VINA DEL MAR|OFICINA VINA DEL MAR|SOBRE'
-        es_excluido = texto_busqueda_pod.str.contains(exclusiones, regex=True, na=False)
-        df_pod_sin_van = df_pod_sin_van_temp[~es_excluido].copy()
+        es_identificado = df_pod_sin_van_temp['Chofer Asignado'] != 'No Identificado'
+        df_pod_sin_van = df_pod_sin_van_temp[es_identificado].copy()
     else:
         df_pod_sin_van = df_pod_sin_van_temp
 
