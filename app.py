@@ -729,7 +729,20 @@ if st.session_state["history"]:
 
     # Regla 2: POD sin VAN
     falla_pod_sin_van = has_pod & ~has_van
-    df_pod_sin_van = df_vapa[falla_pod_sin_van].copy()
+    df_pod_sin_van_temp = df_vapa[falla_pod_sin_van].copy()
+    
+    if not df_pod_sin_van_temp.empty:
+        texto_busqueda_pod = pd.Series("", index=df_pod_sin_van_temp.index)
+        for col in ['Shipper Company', 'Shipper Name', 'CE Recp Address All', 'Recip Company', 'Recip Name']:
+            if col in df_pod_sin_van_temp.columns:
+                texto_busqueda_pod += df_pod_sin_van_temp[col].fillna('').astype(str).str.upper() + " "
+        
+        exclusiones = r'OFICINA FEDEX|OF\. FEDEX VINA DEL MAR|OFICINA VINA DEL MAR|SOBRE'
+        es_excluido = texto_busqueda_pod.str.contains(exclusiones, regex=True, na=False)
+        df_pod_sin_van = df_pod_sin_van_temp[~es_excluido].copy()
+    else:
+        df_pod_sin_van = df_pod_sin_van_temp
+
     if not df_pod_sin_van.empty: df_pod_sin_van['Motivo de Falla'] = 'Tiene POD sin VAN'
     m_pod_sin_van = len(df_pod_sin_van)
 
@@ -1096,7 +1109,8 @@ if st.session_state["history"]:
             c_f1, c_f2 = st.columns([1, 1])
             
             with c_f1:
-                st.markdown("#### Seleccionar Guías (Multiselección)")
+                st.markdown("#### Panel de Justificación Rápida")
+                st.markdown("Edita directamente sobre la tabla (puedes arrastrar celdas hacia abajo para copiar y pegar rápido como en Excel).")
                 
                 todos_justificados = [str(k).strip() for k in st.session_state["justificaciones_admin"].keys()]
                 is_any_justified = clean_trk_bodega.isin(todos_justificados)
@@ -1106,50 +1120,67 @@ if st.session_state["history"]:
                 if df_fallando_base.empty:
                     st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación en la base actual.")
                 else:
-                    display_to_data = {}
-                    vistos = set()
+                    df_editor = df_fallando_base.copy()
+                    df_editor['Tracking Number'] = df_editor['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                    df_editor['Cliente'] = df_editor.get('Shipper Company', df_editor.get('Shipper Name', 'Desc.'))
+                    df_editor['Dirección'] = df_editor.get('CE Recp Address All', 'Desc.')
                     
-                    for _, row in df_fallando_base.iterrows():
-                        trk = str(row.get('Tracking Number', 'S/N')).strip()
-                        if trk not in vistos:
-                            vistos.add(trk)
-                            cliente = str(row.get('Shipper Company', row.get('Shipper Name', 'Desc.')))
-                            direccion = str(row.get('CE Recp Address All', 'Desc.'))
-                            label = f"{trk} ➔ {cliente[:15]} | {direccion[:25]}"
-                            
-                            display_to_data[label] = {
-                                "trk": trk,
-                                "cliente": cliente,
-                                "direccion": direccion
-                            }
+                    df_editor = df_editor[['Tracking Number', 'Cliente', 'Dirección']].drop_duplicates(subset=['Tracking Number'])
+                    df_editor['Categoría Operativa'] = None
+                    df_editor['Ruta (3 dig)'] = ""
                     
-                    opciones_label = list(display_to_data.keys())
+                    edited_df = st.data_editor(
+                        df_editor,
+                        column_config={
+                            "Categoría Operativa": st.column_config.SelectboxColumn(
+                                "Categoría Operativa",
+                                help="Selecciona el motivo",
+                                width="medium",
+                                options=["Sin movimiento", "Sin Van", "POD", "Aplazada"],
+                                required=False,
+                            ),
+                            "Ruta (3 dig)": st.column_config.TextColumn(
+                                "Ruta (3 dig)",
+                                help="Aplica para Sin Van o POD",
+                                max_chars=3,
+                            ),
+                            "Tracking Number": st.column_config.TextColumn(disabled=True),
+                            "Cliente": st.column_config.TextColumn(disabled=True),
+                            "Dirección": st.column_config.TextColumn(disabled=True),
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        height=400,
+                        key="admin_data_editor"
+                    )
                     
-                    trks_seleccionados = st.multiselect("1. Selecciona o busca las Guías a justificar:", opciones_label, placeholder="Elige una o más guías...")
-                    motivo = st.selectbox("2. Categoría Operativa:", ["Sin movimiento", "Sin Van", "POD", "Aplazada"])
-                    
-                    ruta_input = ""
-                    if motivo in ["Sin Van", "POD"]:
-                        ruta_input = st.text_input("3. Ingresar Número de Ruta (Ej. 101):", max_chars=3)
+                    if st.button("💾 Guardar Justificaciones Editadas", type="primary", use_container_width=True):
+                        cambios = edited_df.dropna(subset=["Categoría Operativa"])
+                        cambios = cambios[cambios["Categoría Operativa"].astype(str).str.strip() != ""]
                         
-                    if st.button("💾 Guardar en Base de Datos", use_container_width=True):
-                        if trks_seleccionados:
-                            if motivo in ["Sin Van", "POD"] and len(ruta_input) != 3:
-                                st.warning("⚠️ Debes ingresar un código de ruta de 3 caracteres exactos.")
-                            else:
-                                for label in trks_seleccionados:
-                                    data_real = display_to_data[label]
-                                    st.session_state["justificaciones_admin"][data_real["trk"]] = {
-                                        "estado": motivo, 
-                                        "ruta": ruta_input,
-                                        "cliente": data_real["cliente"],
-                                        "direccion": data_real["direccion"]
-                                    }
+                        errores_ruta = 0
+                        guardados = 0
+                        for _, row in cambios.iterrows():
+                            motivo = row["Categoría Operativa"]
+                            ruta = str(row.get("Ruta (3 dig)", "")).strip()
+                            
+                            if motivo in ["Sin Van", "POD"] and len(ruta) != 3:
+                                errores_ruta += 1
+                                continue
                                 
-                                save_db(st.session_state["justificaciones_admin"])
-                                st.success(f"¡{len(trks_seleccionados)} guías justificadas correctamente! Refresca la tabla para ver los cambios.")
-                        else:
-                            st.warning("Por favor selecciona al menos una guía de la lista.")
+                            st.session_state["justificaciones_admin"][row["Tracking Number"]] = {
+                                "estado": motivo, 
+                                "ruta": ruta,
+                                "cliente": row["Cliente"],
+                                "direccion": row["Dirección"]
+                            }
+                            guardados += 1
+                            
+                        if guardados > 0:
+                            save_db(st.session_state["justificaciones_admin"])
+                            st.success(f"✅ Se guardaron {guardados} justificaciones correctamente. Refresca la tabla o cambia de pestaña para ver el impacto.")
+                        if errores_ruta > 0:
+                            st.warning(f"⚠️ {errores_ruta} guías no se guardaron porque el motivo exigía un número de Ruta de exactamente 3 dígitos.")
             
             with c_f2:
                 st.markdown("#### Historial Activo de Carga Justificada")
