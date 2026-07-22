@@ -1160,27 +1160,39 @@ if st.session_state["history"]:
                         
                         errores_ruta = 0
                         guardados = 0
+                        
+                        # Almacenamos qué decisión se tomó para cada dirección
+                        reglas_por_direccion = {}
+                        
                         for _, row in cambios.iterrows():
                             motivo = row["Categoría Operativa"]
                             ruta = str(row.get("Ruta (3 dig)", "")).strip()
+                            direccion = row["Dirección"]
                             
                             if motivo in ["Sin Van", "POD"] and len(ruta) != 3:
                                 errores_ruta += 1
                                 continue
                                 
-                            st.session_state["justificaciones_admin"][row["Tracking Number"]] = {
-                                "estado": motivo, 
-                                "ruta": ruta,
-                                "cliente": row["Cliente"],
-                                "direccion": row["Dirección"]
-                            }
-                            guardados += 1
-                            
+                            reglas_por_direccion[direccion] = {"motivo": motivo, "ruta": ruta}
+                        
+                        # Aplicamos masivamente a todas las filas que compartan esa dirección en la base de pendientes
+                        for _, row in df_editor.iterrows():
+                            dir_actual = row["Dirección"]
+                            if dir_actual in reglas_por_direccion:
+                                regla = reglas_por_direccion[dir_actual]
+                                st.session_state["justificaciones_admin"][row["Tracking Number"]] = {
+                                    "estado": regla["motivo"], 
+                                    "ruta": regla["ruta"],
+                                    "cliente": row["Cliente"],
+                                    "direccion": dir_actual
+                                }
+                                guardados += 1
+                                
                         if guardados > 0:
                             save_db(st.session_state["justificaciones_admin"])
-                            st.success(f"✅ Se guardaron {guardados} justificaciones correctamente. Refresca la tabla o cambia de pestaña para ver el impacto.")
+                            st.success(f"✅ Se guardaron {guardados} justificaciones (se autocompletó masivamente por dirección). Refresca la tabla para ver el impacto.")
                         if errores_ruta > 0:
-                            st.warning(f"⚠️ {errores_ruta} guías no se guardaron porque el motivo exigía un número de Ruta de exactamente 3 dígitos.")
+                            st.warning(f"⚠️ {errores_ruta} guías no se procesaron porque exigían un número de Ruta de exactamente 3 dígitos.")
             
             with c_f2:
                 st.markdown("#### Historial Activo de Carga Justificada")
