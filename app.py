@@ -159,32 +159,12 @@ st.markdown("""
 # ==============================================================================
 import hashlib
 import time
-
-SECURITY_FILE = "vapa_security.json"
+import base64
+import os
+import json
 
 def check_password():
-    # 1. Pantalla de Configuración Inicial (Solo corre la primera vez)
-    # 1. Validación de Sistema Configurado (Setup Inicial en Web)
-    if not os.path.exists(SECURITY_FILE):
-        st.warning("⚠️ Configuración Inicial de Ciberseguridad")
-        with st.form("setup_form"):
-            st.markdown("Establece las contraseñas maestras. Estas se encriptarán (Hash SHA-256) y nunca se guardarán en texto plano en el código.")
-            op_pwd = st.text_input("Nueva Clave de Operador", type="password", value="Vapa2026")
-            ad_pwd = st.text_input("Nueva Clave de Administrador", type="password", value="AdminVapa2026")
-            if st.form_submit_button("Guardar y Encriptar"):
-                if op_pwd and ad_pwd:
-                    config = {
-                        "op_hash": hashlib.sha256(op_pwd.encode('utf-8')).hexdigest(),
-                        "ad_hash": hashlib.sha256(ad_pwd.encode('utf-8')).hexdigest()
-                    }
-                    with open(SECURITY_FILE, "w") as f:
-                        json.dump(config, f)
-                    st.success("✅ Sistema blindado con éxito. Por favor refresca la página (F5) para iniciar sesión.")
-                else:
-                    st.error("Debes ingresar ambas contraseñas.")
-        return False
-
-    # 2. Control Anti Fuerza-Bruta
+    # 1. Control Anti Fuerza-Bruta
     if "failed_attempts" not in st.session_state:
         st.session_state["failed_attempts"] = 0
     if "lockout_time" not in st.session_state:
@@ -217,18 +197,18 @@ def check_password():
             submitted = st.form_submit_button("Iniciar Sesión")
             
             if submitted:
-                with open(SECURITY_FILE, "r") as f:
-                    sec_config = json.load(f)
+                # Ofuscación de las claves originales para que no estén en texto plano
+                op_expected = hashlib.sha256(base64.b64decode("VmFwYTIwMjY=")).hexdigest()
+                ad_expected = hashlib.sha256(base64.b64decode("QWRtaW5WYXBhMjAyNg==")).hexdigest()
                 
-                # Hashear lo que el usuario ingresó para compararlo
                 input_hash = hashlib.sha256(pwd.encode('utf-8')).hexdigest()
                 
-                if input_hash == sec_config.get("op_hash"): 
+                if input_hash == op_expected: 
                     st.session_state["password_correct"] = True
                     st.session_state["role"] = "operador"
                     st.session_state["failed_attempts"] = 0
                     st.rerun()
-                elif input_hash == sec_config.get("ad_hash"): 
+                elif input_hash == ad_expected: 
                     st.session_state["password_correct"] = True
                     st.session_state["role"] = "admin"
                     st.session_state["failed_attempts"] = 0
