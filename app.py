@@ -164,11 +164,24 @@ SECURITY_FILE = "vapa_security.json"
 
 def check_password():
     # 1. Pantalla de Configuración Inicial (Solo corre la primera vez)
-    # 1. Validación de Sistema Configurado
+    # 1. Validación de Sistema Configurado (Setup Inicial en Web)
     if not os.path.exists(SECURITY_FILE):
-        st.error("⚠️ SISTEMA BLOQUEADO: Configuración Inicial Requerida.")
-        st.warning("Por motivos de seguridad corporativa, las contraseñas no se pueden configurar desde la página web.")
-        st.info("💡 **Solución:** Ve a la computadora que funciona como servidor y haz doble clic en el archivo **`03_CREAR_CLAVES.bat`** para establecer tus contraseñas maestras (Vapa2026, AdminVapa2026). Una vez que lo hagas, refresca esta página.")
+        st.warning("⚠️ Configuración Inicial de Ciberseguridad")
+        with st.form("setup_form"):
+            st.markdown("Establece las contraseñas maestras. Estas se encriptarán (Hash SHA-256) y nunca se guardarán en texto plano en el código.")
+            op_pwd = st.text_input("Nueva Clave de Operador", type="password", value="Vapa2026")
+            ad_pwd = st.text_input("Nueva Clave de Administrador", type="password", value="AdminVapa2026")
+            if st.form_submit_button("Guardar y Encriptar"):
+                if op_pwd and ad_pwd:
+                    config = {
+                        "op_hash": hashlib.sha256(op_pwd.encode('utf-8')).hexdigest(),
+                        "ad_hash": hashlib.sha256(ad_pwd.encode('utf-8')).hexdigest()
+                    }
+                    with open(SECURITY_FILE, "w") as f:
+                        json.dump(config, f)
+                    st.success("✅ Sistema blindado con éxito. Por favor refresca la página (F5) para iniciar sesión.")
+                else:
+                    st.error("Debes ingresar ambas contraseñas.")
         return False
 
     # 2. Control Anti Fuerza-Bruta
