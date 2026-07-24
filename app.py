@@ -1214,8 +1214,17 @@ if st.session_state["history"]:
                     # Verificar VAN o POD en toda la bodega
                     has_v_bodega = bodega_masters.get('VAN All', pd.Series(dtype=str)).astype(str).str.strip().replace('nan', '') != ""
                     has_p_bodega = bodega_masters.get('POD All', pd.Series(dtype=str)).astype(str).str.strip().replace('nan', '') != ""
+                    has_37 = bodega_masters.get('STAT 37 Latest', pd.Series(dtype=str)).astype(str).str.strip().replace('nan', '') != ""
+                    has_50 = bodega_masters.get('STAT 50 Latest', pd.Series(dtype=str)).astype(str).str.strip().replace('nan', '') != ""
                     
-                    masters_con_movimiento = set(bodega_masters[has_v_bodega | has_p_bodega]['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip())
+                    bodega_masters_clean = bodega_masters.copy()
+                    bodega_masters_clean['Master Tracking Number'] = bodega_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                    
+                    bodega_movimiento = bodega_masters_clean[has_v_bodega | has_p_bodega]
+                    dict_choferes = bodega_movimiento.groupby('Master Tracking Number')['Chofer Asignado'].first().to_dict() if not bodega_movimiento.empty else {}
+                    
+                    set_37 = set(bodega_masters_clean[has_37]['Master Tracking Number'])
+                    set_50 = set(bodega_masters_clean[has_50]['Master Tracking Number'])
                     
                     def evaluar_multipieza(row):
                         master = str(row.get('Master Tracking Number', '')).replace('.0', '').strip()
@@ -1226,10 +1235,15 @@ if st.session_state["history"]:
                             pcs = 1
                             
                         if pcs > 1 and master and master != 'nan' and master != '':
-                            if master in masters_con_movimiento:
-                                return "⚠️ Hermana con VAN/POD"
+                            if master in dict_choferes:
+                                chofer = dict_choferes[master]
+                                return f"⚠️ Envíos vinculados los lleva {chofer}"
+                            elif master in set_37:
+                                return "⚠️ Otra pieza tiene STAT 37"
+                            elif master in set_50:
+                                return "⚠️ Otra pieza tiene STAT 50"
                             else:
-                                return "❌ Ninguna tiene VAN/POD"
+                                return "❌ Multipieza entera estancada"
                         return ""
                     
                     df_editor['Alerta Multipieza'] = df_editor.apply(evaluar_multipieza, axis=1)
