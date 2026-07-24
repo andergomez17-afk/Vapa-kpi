@@ -1265,22 +1265,25 @@ if st.session_state["history"]:
                     has_v_bodega = check_condicion('VAN All')
                     has_p_bodega = check_condicion('POD All')
                     
+                    has_37 = check_condicion('STAT 37 Latest')
+                    has_50 = check_condicion('STAT 50 Latest')
+                    has_53 = check_condicion('STAT 53 All')
+                    has_44 = check_condicion('STAT 44 Date Time Latest')
+                    fecha_hoy_pegada = datetime.now().strftime("%d%m%Y")
+                    has_44_hoy = has_44 & bodega_masters.get('STAT 44 Date Time Latest', pd.Series(dtype=str)).astype(str).str.contains(fecha_hoy_pegada, regex=False, na=False)
+                    
+                    has_estacion_stat = has_37 | has_50 | has_53 | has_44_hoy
+                    
                     bodega_masters_clean = bodega_masters.copy()
                     bodega_masters_clean['Master Tracking Number'] = bodega_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                     
                     bodega_movimiento = bodega_masters_clean[has_v_bodega | has_p_bodega].copy()
                     if not bodega_movimiento.empty:
-                        def get_mov(row):
-                            v = str(row.get('VAN All', '')).strip().replace('nan', '')
-                            p = str(row.get('POD All', '')).strip().replace('nan', '')
-                            if p != "": return "POD"
-                            if v != "": return "VAN"
-                            return "movimiento"
-                        bodega_movimiento['Tipo Mov'] = bodega_movimiento.apply(get_mov, axis=1)
-                        dict_movimiento = bodega_movimiento.groupby('Master Tracking Number').first()[['Chofer Asignado', 'Tracking Number', 'Tipo Mov']].to_dict(orient='index')
+                        dict_movimiento = bodega_movimiento.groupby('Master Tracking Number').first()[['Chofer Asignado']].to_dict(orient='index')
                     else:
                         dict_movimiento = {}
-                    
+                        
+                    set_estacion = set(bodega_masters_clean[has_estacion_stat]['Master Tracking Number'])
                     
                     def evaluar_multipieza(row):
                         master = str(row.get('Master Tracking Number', '')).replace('.0', '').strip()
@@ -1297,6 +1300,8 @@ if st.session_state["history"]:
                                     return "⚠️ Otras partes en ruta"
                                 else:
                                     return f"⚠️ Otras partes en ruta ({chofer})"
+                            elif master in set_estacion:
+                                return "⚠️ En Estación (Stat aplicado)"
                             else:
                                 return "❌ Sin movimiento"
                         return ""
