@@ -572,6 +572,12 @@ def generar_pdf_falla(df_falla, titulo_pdf, sort_by_chofer=False):
 # ==============================================================================
 st.sidebar.header("📥 Ingreso de Datos")
 
+st.sidebar.markdown(f"**👤 Sesión actual:** {'Administrador' if st.session_state.get('role') == 'admin' else 'Operador'}")
+if st.sidebar.button("Cerrar Sesión", use_container_width=True):
+    st.session_state["password_correct"] = False
+    st.session_state["role"] = None
+    st.rerun()
+
 if st.session_state.get("role") == "admin":
     with st.sidebar.expander("⚙️ Ajustes"):
         st.markdown("<span style='font-size:12px; color:#A0A0A0;'>Usa este botón para borrar todos los Excel del servidor y empezar un mes nuevo.</span>", unsafe_allow_html=True)
