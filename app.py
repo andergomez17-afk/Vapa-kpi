@@ -1188,13 +1188,13 @@ if st.session_state["history"]:
                             "Cliente": st.column_config.TextColumn(disabled=True),
                             "Dirección": st.column_config.TextColumn(disabled=True),
                         },
-                    hide_index=True,
-                    use_container_width=True,
-                    height=550,
-                    key="admin_data_editor"
-                )
+                        hide_index=True,
+                        use_container_width=True,
+                        height=550,
+                        key="admin_data_editor"
+                    )
                 
-                if st.form_submit_button("💾 Guardar Justificaciones Editadas", type="primary", use_container_width=True):
+                    if st.form_submit_button("💾 Guardar Justificaciones Editadas", type="primary", use_container_width=True):
                         cambios = edited_df.dropna(subset=["Categoría Operativa"])
                         cambios = cambios[cambios["Categoría Operativa"].astype(str).str.strip() != ""]
                         
