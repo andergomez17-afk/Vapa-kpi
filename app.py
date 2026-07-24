@@ -590,6 +590,59 @@ def generar_pdf_falla(df_falla, titulo_pdf, sort_by_chofer=False):
         with open(tmp.name, "rb") as f:
             return f.read()
 
+def generar_pdf_justificaciones(df_just, titulo_pdf):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    
+    pdf.set_fill_color(77, 20, 140) 
+    pdf.rect(0, 0, 210, 25, 'F')
+    
+    pdf.set_y(8)
+    pdf.set_font("Arial", 'B', 16)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 10, txt=titulo_pdf, ln=True, align='C')
+    
+    pdf.set_y(35)
+    pdf.set_font("Arial", 'B', 10)
+    pdf.set_text_color(0, 0, 0)
+    fecha_str = datetime.now().strftime('%d-%m-%Y %H:%M')
+    pdf.cell(0, 8, txt=f"FECHA DE EMISION: {fecha_str}", ln=True)
+    pdf.cell(0, 8, txt=f"TOTAL JUSTIFICADOS: {len(df_just)}", ln=True)
+    pdf.ln(5)
+    
+    def imprimir_cabecera():
+        pdf.set_fill_color(0, 170, 80)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font("Arial", 'B', 8)
+        pdf.cell(35, 8, txt="Tracking", border=1, fill=True)
+        pdf.cell(50, 8, txt="Cliente", border=1, fill=True)
+        pdf.cell(40, 8, txt="Categoria", border=1, fill=True)
+        pdf.cell(20, 8, txt="Ruta", border=1, fill=True)
+        pdf.cell(45, 8, txt="KPI", border=1, fill=True, ln=True)
+    
+    imprimir_cabecera()
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Arial", '', 7)
+    
+    for _, row in df_just.iterrows():
+        trk = clean_pdf_text(row.get('Tracking', 'N/A'))[:20]
+        cliente = clean_pdf_text(row.get('Cliente', 'N/A'))[:30]
+        cat = clean_pdf_text(row.get('Categoría', 'N/A'))[:20]
+        ruta = clean_pdf_text(row.get('Ruta', 'N/A'))[:10]
+        kpi = clean_pdf_text(row.get('KPI', 'N/A'))[:25]
+        
+        pdf.cell(35, 6, txt=trk, border=1)
+        pdf.cell(50, 6, txt=cliente, border=1)
+        pdf.cell(40, 6, txt=cat, border=1)
+        pdf.cell(20, 6, txt=ruta, border=1)
+        pdf.cell(45, 6, txt=kpi, border=1, ln=True)
+        
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        pdf.output(tmp.name)
+        with open(tmp.name, "rb") as f:
+            return f.read()
+
 # ==============================================================================
 # 5. BARRA LATERAL (CON PROTECCIÓN DE FINES DE SEMANA)
 # ==============================================================================
@@ -1418,7 +1471,19 @@ elif st.session_state["history"]:
                         "KPI": impacto
                     })
                     
-                st.dataframe(pd.DataFrame(datos_just), use_container_width=True, hide_index=True)
+                df_hist_just = pd.DataFrame(datos_just)
+                st.dataframe(df_hist_just, use_container_width=True, hide_index=True)
+                
+                if HAS_FPDF:
+                    pdf_bytes_just = generar_pdf_justificaciones(df_hist_just, "REPORTE DE GESTION INVENTARIO")
+                    st.download_button(
+                        label="📄 Descargar Reporte de Gestión en PDF",
+                        data=pdf_bytes_just,
+                        file_name=f"Reporte_Gestion_Inventario_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                        type="secondary"
+                    )
             else:
                 st.info("Aún no se han registrado justificaciones en la Base de Datos.")
 
