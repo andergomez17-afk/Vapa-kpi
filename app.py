@@ -163,6 +163,41 @@ import base64
 import os
 import json
 
+USERS_FILE = "vapa_users.json"
+
+def load_users():
+    if not os.path.exists(USERS_FILE):
+        default_users = {
+            "user": {
+                "nombre": "Operador",
+                "apellido": "Vapa",
+                "role": "operador",
+                "hash": hashlib.sha256("Vapa2026".encode('utf-8')).hexdigest()
+            },
+            "Admin": {
+                "nombre": "Admin",
+                "apellido": "Local",
+                "role": "admin",
+                "hash": hashlib.sha256("AdminVapa2026".encode('utf-8')).hexdigest()
+            },
+            "SAdmin": {
+                "nombre": "Super",
+                "apellido": "Admin",
+                "role": "sadmin",
+                "hash": hashlib.sha256("An804223".encode('utf-8')).hexdigest()
+            }
+        }
+        with open(USERS_FILE, "w") as f:
+            json.dump(default_users, f)
+        return default_users
+    
+    with open(USERS_FILE, "r") as f:
+        return json.load(f)
+
+def save_users(users_dict):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users_dict, f)
+
 def check_password():
     # 1. Control Anti Fuerza-Bruta
     if "failed_attempts" not in st.session_state:
@@ -178,6 +213,7 @@ def check_password():
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
         st.session_state["role"] = None
+        st.session_state["current_user"] = None
 
     if not st.session_state["password_correct"]:
         with st.form("login_form"):
@@ -193,35 +229,35 @@ def check_password():
                 </div>
             """, unsafe_allow_html=True)
             
-            pwd = st.text_input("Clave de Acceso", type="password", placeholder="Clave Operador o Admin...")
+            username = st.text_input("Usuario (ID)", placeholder="Ej. Admin")
+            pwd = st.text_input("Contraseña", type="password", placeholder="Tu clave secreta...")
             submitted = st.form_submit_button("Iniciar Sesión")
             
             if submitted:
-                # Ofuscación de las claves originales para que no estén en texto plano
-                op_expected = hashlib.sha256(base64.b64decode("VmFwYTIwMjY=")).hexdigest()
-                ad_expected = hashlib.sha256(base64.b64decode("QWRtaW5WYXBhMjAyNg==")).hexdigest()
+                users = load_users()
+                user_id = username.strip()
                 
-                input_hash = hashlib.sha256(pwd.encode('utf-8')).hexdigest()
-                
-                if input_hash == op_expected: 
-                    st.session_state["password_correct"] = True
-                    st.session_state["role"] = "operador"
-                    st.session_state["failed_attempts"] = 0
-                    st.rerun()
-                elif input_hash == ad_expected: 
-                    st.session_state["password_correct"] = True
-                    st.session_state["role"] = "admin"
-                    st.session_state["failed_attempts"] = 0
-                    st.rerun()
+                if user_id in users:
+                    input_hash = hashlib.sha256(pwd.encode('utf-8')).hexdigest()
+                    if input_hash == users[user_id]["hash"]:
+                        st.session_state["password_correct"] = True
+                        st.session_state["role"] = users[user_id]["role"]
+                        st.session_state["current_user"] = users[user_id]
+                        st.session_state["failed_attempts"] = 0
+                        st.rerun()
+                    else:
+                        st.session_state["failed_attempts"] += 1
                 else:
                     st.session_state["failed_attempts"] += 1
+                
+                if not st.session_state.get("password_correct", False):
                     if st.session_state["failed_attempts"] >= 5:
                         st.session_state["lockout_time"] = time.time() + 180 # Bloqueo de 3 minutos
                         st.error("🚨 Límite de intentos superado. Bloqueo de seguridad activado.")
                         st.rerun()
                     else:
                         intentos_restantes = 5 - st.session_state["failed_attempts"]
-                        st.error(f"❌ Credencial denegada. Intentos restantes: {intentos_restantes}")
+                        st.error(f"❌ Credenciales incorrectas. Intentos restantes: {intentos_restantes}")
         return False
     return True
 
@@ -246,10 +282,12 @@ if "history" not in st.session_state:
 col_titulo, col_salir = st.columns([7, 1])
 with col_titulo:
     st.markdown("<h1 style='margin-bottom: 0px;'>📦 Monitoreo de Almacén</h1>", unsafe_allow_html=True)
-    if st.session_state.get("role") == "admin":
-        st.caption("🟢 Conectado como: **ADMINISTRADOR** | Valparaíso Operations")
+    if st.session_state.get("role") == "sadmin":
+        st.caption(f"🟣 Conectado como: **SUPERADMIN** | {st.session_state['current_user']['nombre']} {st.session_state['current_user']['apellido']}")
+    elif st.session_state.get("role") == "admin":
+        st.caption(f"🟢 Conectado como: **ADMINISTRADOR** | {st.session_state['current_user']['nombre']} {st.session_state['current_user']['apellido']}")
     else:
-        st.caption("🔵 Conectado como: **OPERADOR** | Valparaíso Operations")
+        st.caption(f"🔵 Conectado como: **OPERADOR** | {st.session_state['current_user']['nombre']} {st.session_state['current_user']['apellido']}")
 
 with col_salir:
     st.write("") 
@@ -558,7 +596,7 @@ if st.sidebar.button("Cerrar Sesión", use_container_width=True):
     st.session_state["role"] = None
     st.rerun()
 
-if st.session_state.get("role") == "admin":
+if st.session_state.get("role") in ["admin", "sadmin"]:
     with st.sidebar.expander("⚙️ Ajustes"):
         st.markdown("<span style='font-size:12px; color:#A0A0A0;'>Usa este botón para borrar todos los Excel del servidor y empezar un mes nuevo.</span>", unsafe_allow_html=True)
         if st.button("🧹 Borrar Historial del Servidor", use_container_width=True, type="primary"):
@@ -959,7 +997,7 @@ if st.session_state["history"]:
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin", "📅 Historial KPI"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin", "📅 Historial KPI", "👥 Gestión de Usuarios"])
     
     with tab1:
         st.markdown("### Resumen de Excepciones e Inventario")
@@ -1144,7 +1182,7 @@ if st.session_state["history"]:
             )
         st.divider()
 
-        if st.session_state.get("role") != "admin":
+        if st.session_state.get("role") not in ["admin", "sadmin"]:
             st.error("🔒 ACCESO DENEGADO. Solo el equipo de Administración puede modificar el status de la carga estancada y cerrar el día.")
             st.info("Para acceder, debe cerrar sesión e ingresar con la credencial de Administrador.")
         else:
@@ -1298,6 +1336,69 @@ if st.session_state["history"]:
 
     with tab5:
         mostrar_historial_kpi()
+
+    with tab6:
+        if st.session_state.get("role") != "sadmin":
+            st.error("🔒 ACCESO DENEGADO. Solo el Super Administrador puede gestionar los perfiles de usuario.")
+        else:
+            st.markdown("### 👥 Administración de Usuarios")
+            st.markdown("Crea o elimina credenciales de acceso para tu equipo.")
+            
+            c_u1, c_u2 = st.columns([1, 1.5])
+            
+            with c_u1:
+                with st.form("new_user_form"):
+                    st.subheader("Crear Nuevo Usuario")
+                    nu_id = st.text_input("Usuario (ID de Acceso)*")
+                    nu_nombre = st.text_input("Nombre*")
+                    nu_apellido = st.text_input("Apellido*")
+                    nu_pwd = st.text_input("Contraseña*", type="password")
+                    nu_role = st.selectbox("Tipo de Perfil*", ["operador", "admin"])
+                    
+                    if st.form_submit_button("➕ Registrar Usuario", type="primary"):
+                        if nu_id and nu_nombre and nu_apellido and nu_pwd:
+                            users_db = load_users()
+                            if nu_id.strip() in users_db:
+                                st.error(f"El ID de usuario '{nu_id}' ya existe.")
+                            else:
+                                users_db[nu_id.strip()] = {
+                                    "nombre": nu_nombre.strip(),
+                                    "apellido": nu_apellido.strip(),
+                                    "role": nu_role,
+                                    "hash": hashlib.sha256(nu_pwd.encode('utf-8')).hexdigest()
+                                }
+                                save_users(users_db)
+                                st.success(f"Usuario {nu_id} creado correctamente.")
+                                st.rerun()
+                        else:
+                            st.warning("Completa todos los campos obligatorios (*).")
+            
+            with c_u2:
+                st.subheader("Usuarios Activos")
+                users_db = load_users()
+                
+                lista_usuarios = []
+                for uid, udata in users_db.items():
+                    lista_usuarios.append({
+                        "ID Acceso": uid,
+                        "Nombre": f"{udata.get('nombre','')} {udata.get('apellido','')}",
+                        "Perfil": udata.get('role','').upper()
+                    })
+                
+                st.dataframe(pd.DataFrame(lista_usuarios), use_container_width=True, hide_index=True)
+                
+                with st.expander("🗑️ Eliminar un Usuario"):
+                    del_id = st.text_input("Escribe el ID del usuario a eliminar (No puedes eliminar a SAdmin)")
+                    if st.button("Eliminar Usuario", type="primary"):
+                        if del_id == "SAdmin":
+                            st.error("No se puede eliminar la cuenta principal de SuperAdmin.")
+                        elif del_id in users_db:
+                            del users_db[del_id]
+                            save_users(users_db)
+                            st.success(f"Usuario {del_id} eliminado.")
+                            st.rerun()
+                        else:
+                            st.error("El usuario no existe.")
 
 else:
     st.info("👋 ¡Hola! Despliega el menú lateral y espera a que el servidor auto-cargue los reportes, o inicia sesión como Administrador para subir uno nuevo.")
