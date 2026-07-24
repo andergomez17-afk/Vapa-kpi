@@ -1297,12 +1297,10 @@ if st.session_state["history"]:
                         if pcs > 1 and master and master != 'nan' and master != '':
                             if master in dict_movimiento:
                                 chofer = dict_movimiento[master].get('Chofer Asignado', 'No Identificado')
-                                trk = dict_movimiento[master].get('Tracking Number', '')
-                                mov = dict_movimiento[master].get('Tipo Mov', 'movimiento')
                                 if chofer == "No Identificado":
-                                    return f"⚠️ Pieza {trk} con {mov}"
+                                    return "⚠️ Otras partes en ruta"
                                 else:
-                                    return f"⚠️ Pieza {trk} con {mov} ({chofer})"
+                                    return f"⚠️ Otras partes en ruta ({chofer})"
                             elif master in set_37:
                                 return "⚠️ Otra pieza tiene STAT 37"
                             elif master in set_50:
