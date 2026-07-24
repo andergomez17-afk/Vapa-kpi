@@ -1462,7 +1462,7 @@ elif st.session_state["history"]:
                 datos_just = []
                 for k, v in st.session_state["justificaciones_admin"].items():
                     estado = v.get("estado", "")
-                    impacto = "❌ Sigue en Fallo" if estado == "Sin movimiento" else "✅ Perdonado del KPI"
+                    impacto = "❌ Sigue en Fallo" if estado == "Sin movimiento" else "✅ Justificado"
                     datos_just.append({
                         "Tracking": k, 
                         "Cliente": v.get("cliente", "N/A"),
