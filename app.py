@@ -155,9 +155,45 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. CAPA DE SEGURIDAD (LOGIN CON ROLES)
+# 2. CAPA DE CIBERSEGURIDAD AVANZADA (HASH SHA-256 Y ANTI-BRUTE FORCE)
 # ==============================================================================
+import hashlib
+import time
+
+SECURITY_FILE = "vapa_security.json"
+
 def check_password():
+    # 1. Pantalla de Configuración Inicial (Solo corre la primera vez)
+    if not os.path.exists(SECURITY_FILE):
+        st.warning("⚠️ Configuración Inicial de Ciberseguridad")
+        with st.form("setup_form"):
+            st.markdown("Establece las contraseñas maestras. Estas se encriptarán (Hash SHA-256) y nunca se guardarán en texto plano en el código.")
+            op_pwd = st.text_input("Nueva Clave de Operador", type="password")
+            ad_pwd = st.text_input("Nueva Clave de Administrador", type="password")
+            if st.form_submit_button("Guardar y Encriptar"):
+                if op_pwd and ad_pwd:
+                    config = {
+                        "op_hash": hashlib.sha256(op_pwd.encode('utf-8')).hexdigest(),
+                        "ad_hash": hashlib.sha256(ad_pwd.encode('utf-8')).hexdigest()
+                    }
+                    with open(SECURITY_FILE, "w") as f:
+                        json.dump(config, f)
+                    st.success("✅ Sistema blindado con éxito. Por favor refresca la página (F5) para iniciar sesión.")
+                else:
+                    st.error("Debes ingresar ambas contraseñas.")
+        return False
+
+    # 2. Control Anti Fuerza-Bruta
+    if "failed_attempts" not in st.session_state:
+        st.session_state["failed_attempts"] = 0
+    if "lockout_time" not in st.session_state:
+        st.session_state["lockout_time"] = 0
+
+    if st.session_state["lockout_time"] > time.time():
+        faltan = int(st.session_state["lockout_time"] - time.time())
+        st.error(f"🚨 ACCESO BLOQUEADO por seguridad (Múltiples intentos fallidos). Intenta de nuevo en {faltan} segundos.")
+        return False
+
     if "password_correct" not in st.session_state:
         st.session_state["password_correct"] = False
         st.session_state["role"] = None
@@ -171,7 +207,7 @@ def check_password():
                         <span style='color: #FF6600; font-weight: 900;'>VAPA</span>
                     </h2>
                     <p style='color: #A0A0A0; font-size: 14px; margin-bottom: 0px;'>
-                        Control de Operaciones e Inventario
+                        Control Operativo - Acceso Encriptado
                     </p>
                 </div>
             """, unsafe_allow_html=True)
@@ -180,16 +216,31 @@ def check_password():
             submitted = st.form_submit_button("Iniciar Sesión")
             
             if submitted:
-                if pwd == "Vapa2026": 
+                with open(SECURITY_FILE, "r") as f:
+                    sec_config = json.load(f)
+                
+                # Hashear lo que el usuario ingresó para compararlo
+                input_hash = hashlib.sha256(pwd.encode('utf-8')).hexdigest()
+                
+                if input_hash == sec_config.get("op_hash"): 
                     st.session_state["password_correct"] = True
                     st.session_state["role"] = "operador"
+                    st.session_state["failed_attempts"] = 0
                     st.rerun()
-                elif pwd == "AdminVapa2026": 
+                elif input_hash == sec_config.get("ad_hash"): 
                     st.session_state["password_correct"] = True
                     st.session_state["role"] = "admin"
+                    st.session_state["failed_attempts"] = 0
                     st.rerun()
                 else:
-                    st.error("❌ Credencial denegada. Verifica tu clave.")
+                    st.session_state["failed_attempts"] += 1
+                    if st.session_state["failed_attempts"] >= 5:
+                        st.session_state["lockout_time"] = time.time() + 180 # Bloqueo de 3 minutos
+                        st.error("🚨 Límite de intentos superado. Bloqueo de seguridad activado.")
+                        st.rerun()
+                    else:
+                        intentos_restantes = 5 - st.session_state["failed_attempts"]
+                        st.error(f"❌ Credencial denegada. Intentos restantes: {intentos_restantes}")
         return False
     return True
 
@@ -609,6 +660,10 @@ def mostrar_historial_kpi():
                         <div class='metric-box' style='flex:1; border-bottom-color:#E63946; min-height:80px; padding:10px;'>
                             <span class='metric-title' style='font-size:10px;'>Fallando (Stat 44)</span>
                             <span class='metric-value' style='font-size:22px; color:#E63946;'>{row.get("Fallando Compromiso", 0)}</span>
+                        </div>
+                        <div class='metric-box' style='flex:1; border-bottom-color:#FF2B2B; min-height:80px; padding:10px;'>
+                            <span class='metric-title' style='font-size:10px;'>Salió SIN SIP</span>
+                            <span class='metric-value' style='font-size:22px; color:#FF2B2B;'>{row.get("Salió SIN SIP", 0)}</span>
                         </div>
                     </div>
                     '''
@@ -1241,6 +1296,7 @@ if st.session_state["history"]:
                             "Fecha de Registro": f"{dia_str} 23:59:59", 
                             "Total Procesados": total_ingreso,
                             "Bultos en Ruta": m_en_ruta,
+                            "Salió SIN SIP": m_sin_sip,
                             "Total Compromisos": total_compromiso_hoy,
                             "Fallando Compromiso": corregir_44_aplazar_total,
                             "Porcentaje de Éxito": pct_exito, 
