@@ -1264,8 +1264,6 @@ if st.session_state["history"]:
                         
                     has_v_bodega = check_condicion('VAN All')
                     has_p_bodega = check_condicion('POD All')
-                    has_37 = check_condicion('STAT 37 Latest')
-                    has_50 = check_condicion('STAT 50 Latest')
                     
                     bodega_masters_clean = bodega_masters.copy()
                     bodega_masters_clean['Master Tracking Number'] = bodega_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
@@ -1283,8 +1281,6 @@ if st.session_state["history"]:
                     else:
                         dict_movimiento = {}
                     
-                    set_37 = set(bodega_masters_clean[has_37]['Master Tracking Number'])
-                    set_50 = set(bodega_masters_clean[has_50]['Master Tracking Number'])
                     
                     def evaluar_multipieza(row):
                         master = str(row.get('Master Tracking Number', '')).replace('.0', '').strip()
@@ -1301,12 +1297,8 @@ if st.session_state["history"]:
                                     return "⚠️ Otras partes en ruta"
                                 else:
                                     return f"⚠️ Otras partes en ruta ({chofer})"
-                            elif master in set_37:
-                                return "⚠️ Otra pieza tiene STAT 37"
-                            elif master in set_50:
-                                return "⚠️ Otra pieza tiene STAT 50"
                             else:
-                                return "❌ Multipieza entera estancada"
+                                return "❌ Sin movimiento"
                         return ""
                     
                     df_editor['Alerta Multipieza'] = df_editor.apply(evaluar_multipieza, axis=1)
