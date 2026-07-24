@@ -1225,7 +1225,10 @@ if st.session_state["history"]:
                     bodega_masters_clean['Master Tracking Number'] = bodega_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                     
                     bodega_movimiento = bodega_masters_clean[has_v_bodega | has_p_bodega]
-                    dict_choferes = bodega_movimiento.groupby('Master Tracking Number')['Chofer Asignado'].first().to_dict() if not bodega_movimiento.empty else {}
+                    if not bodega_movimiento.empty:
+                        dict_movimiento = bodega_movimiento.groupby('Master Tracking Number').first()[['Chofer Asignado', 'Tracking Number']].to_dict(orient='index')
+                    else:
+                        dict_movimiento = {}
                     
                     set_37 = set(bodega_masters_clean[has_37]['Master Tracking Number'])
                     set_50 = set(bodega_masters_clean[has_50]['Master Tracking Number'])
@@ -1239,9 +1242,13 @@ if st.session_state["history"]:
                             pcs = 1
                             
                         if pcs > 1 and master and master != 'nan' and master != '':
-                            if master in dict_choferes:
-                                chofer = dict_choferes[master]
-                                return f"⚠️ Envíos vinculados los lleva {chofer}"
+                            if master in dict_movimiento:
+                                chofer = dict_movimiento[master].get('Chofer Asignado', 'No Identificado')
+                                trk = dict_movimiento[master].get('Tracking Number', '')
+                                if chofer == "No Identificado" and trk:
+                                    return f"⚠️ Pieza vinculada {trk} tiene VAN/POD"
+                                else:
+                                    return f"⚠️ Envíos vinculados los lleva {chofer}"
                             elif master in set_37:
                                 return "⚠️ Otra pieza tiene STAT 37"
                             elif master in set_50:
