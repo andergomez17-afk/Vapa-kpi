@@ -137,7 +137,7 @@ st.markdown("""
     .metric-value { font-size: 28px; font-weight: 900; color: #FFFFFF; display: block; }
     
     [data-testid="stForm"] {
-        max-width: 400px; margin: 60px auto; padding: 35px; 
+        padding: 35px; 
         background-color: #1A1A1A; border-radius: 15px; 
         border: none;
         border-top: 5px solid #4D148C; border-bottom: 5px solid #FF6600;
@@ -216,48 +216,53 @@ def check_password():
         st.session_state["current_user"] = None
 
     if not st.session_state["password_correct"]:
-        with st.form("login_form"):
-            st.markdown("""
-                <div style='text-align: center; padding-bottom: 15px;'>
-                    <h2 style='margin-top: 10px; margin-bottom: 5px; font-size: 42px;'>
-                        <span style='color: #4D148C; font-weight: 900;'>FedEx</span> 
-                        <span style='color: #FF6600; font-weight: 900;'>VAPA</span>
-                    </h2>
-                    <p style='color: #A0A0A0; font-size: 14px; margin-bottom: 0px;'>
-                        Control Operativo - Acceso Encriptado
-                    </p>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            username = st.text_input("Usuario (ID)", placeholder="Ej. Admin")
-            pwd = st.text_input("Contraseña", type="password", placeholder="Tu clave secreta...")
-            submitted = st.form_submit_button("Iniciar Sesión")
-            
-            if submitted:
-                users = load_users()
-                user_id = username.strip()
+        c_log1, c_log2, c_log3 = st.columns([1, 1.2, 1])
+        with c_log2:
+            with st.form("login_form"):
+                st.markdown("""
+                    <div style='text-align: center; padding-bottom: 15px;'>
+                        <h2 style='margin-top: 10px; margin-bottom: 5px; font-size: 42px;'>
+                            <span style='color: #4D148C; font-weight: 900;'>FedEx</span> 
+                            <span style='color: #FF6600; font-weight: 900;'>VAPA</span>
+                        </h2>
+                        <p style='color: #A0A0A0; font-size: 14px; margin-bottom: 0px;'>
+                            Control Operativo - Acceso Encriptado
+                        </p>
+                    </div>
+                """, unsafe_allow_html=True)
                 
-                if user_id in users:
-                    input_hash = hashlib.sha256(pwd.encode('utf-8')).hexdigest()
-                    if input_hash == users[user_id]["hash"]:
-                        st.session_state["password_correct"] = True
-                        st.session_state["role"] = users[user_id]["role"]
-                        st.session_state["current_user"] = users[user_id]
-                        st.session_state["failed_attempts"] = 0
-                        st.rerun()
+                username = st.text_input("Usuario (ID)", placeholder="Ej. Admin")
+                pwd = st.text_input("Contraseña", type="password", placeholder="Tu clave secreta...")
+                submitted = st.form_submit_button("Iniciar Sesión")
+                
+                if submitted:
+                    users = load_users()
+                    user_id = username.strip()
+                    
+                    if user_id in users:
+                        input_hash = hashlib.sha256(pwd.encode('utf-8')).hexdigest()
+                        if input_hash == users[user_id]["hash"]:
+                            st.session_state["password_correct"] = True
+                            st.session_state["role"] = users[user_id]["role"]
+                            st.session_state["current_user"] = users[user_id]
+                            st.session_state["failed_attempts"] = 0
+                            st.rerun()
+                        else:
+                            st.session_state["failed_attempts"] += 1
                     else:
                         st.session_state["failed_attempts"] += 1
-                else:
-                    st.session_state["failed_attempts"] += 1
-                
-                if not st.session_state.get("password_correct", False):
-                    if st.session_state["failed_attempts"] >= 5:
-                        st.session_state["lockout_time"] = time.time() + 180 # Bloqueo de 3 minutos
-                        st.error("🚨 Límite de intentos superado. Bloqueo de seguridad activado.")
-                        st.rerun()
-                    else:
-                        intentos_restantes = 5 - st.session_state["failed_attempts"]
-                        st.error(f"❌ Credenciales incorrectas. Intentos restantes: {intentos_restantes}")
+                    
+                    if not st.session_state.get("password_correct", False):
+                        if st.session_state["failed_attempts"] >= 5:
+                            st.session_state["lockout_time"] = time.time() + 180 # Bloqueo de 3 minutos
+                            st.error("🚨 Límite de intentos superado. Bloqueo de seguridad activado.")
+                            st.rerun()
+                        else:
+                            intentos_restantes = 5 - st.session_state["failed_attempts"]
+                            st.error(f"❌ Credenciales incorrectas. Intentos restantes: {intentos_restantes}")
+            
+            # Espaciado extra si es necesario para empujar el form
+            st.markdown("<br>", unsafe_allow_html=True)
         return False
     return True
 
