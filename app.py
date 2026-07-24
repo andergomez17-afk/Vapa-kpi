@@ -1224,9 +1224,16 @@ if st.session_state["history"]:
                     bodega_masters_clean = bodega_masters.copy()
                     bodega_masters_clean['Master Tracking Number'] = bodega_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                     
-                    bodega_movimiento = bodega_masters_clean[has_v_bodega | has_p_bodega]
+                    bodega_movimiento = bodega_masters_clean[has_v_bodega | has_p_bodega].copy()
                     if not bodega_movimiento.empty:
-                        dict_movimiento = bodega_movimiento.groupby('Master Tracking Number').first()[['Chofer Asignado', 'Tracking Number']].to_dict(orient='index')
+                        def get_mov(row):
+                            v = str(row.get('VAN All', '')).strip().replace('nan', '')
+                            p = str(row.get('POD All', '')).strip().replace('nan', '')
+                            if p != "": return "POD"
+                            if v != "": return "VAN"
+                            return "movimiento"
+                        bodega_movimiento['Tipo Mov'] = bodega_movimiento.apply(get_mov, axis=1)
+                        dict_movimiento = bodega_movimiento.groupby('Master Tracking Number').first()[['Chofer Asignado', 'Tracking Number', 'Tipo Mov']].to_dict(orient='index')
                     else:
                         dict_movimiento = {}
                     
@@ -1245,10 +1252,11 @@ if st.session_state["history"]:
                             if master in dict_movimiento:
                                 chofer = dict_movimiento[master].get('Chofer Asignado', 'No Identificado')
                                 trk = dict_movimiento[master].get('Tracking Number', '')
-                                if chofer == "No Identificado" and trk:
-                                    return f"⚠️ Pieza vinculada {trk} tiene VAN/POD"
+                                mov = dict_movimiento[master].get('Tipo Mov', 'movimiento')
+                                if chofer == "No Identificado":
+                                    return f"⚠️ Pieza {trk} con {mov}"
                                 else:
-                                    return f"⚠️ Envíos vinculados los lleva {chofer}"
+                                    return f"⚠️ Pieza {trk} con {mov} ({chofer})"
                             elif master in set_37:
                                 return "⚠️ Otra pieza tiene STAT 37"
                             elif master in set_50:
