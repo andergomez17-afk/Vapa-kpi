@@ -602,50 +602,13 @@ if st.sidebar.button("Cerrar Sesión", use_container_width=True):
     st.rerun()
 
 if st.session_state.get("role") == "sadmin":
-    with st.sidebar.expander("👥 Gestión de Usuarios", expanded=False):
-        st.markdown("<span style='font-size:12px; color:#A0A0A0;'>Crea o elimina credenciales de acceso para tu equipo.</span>", unsafe_allow_html=True)
-        with st.form("new_user_form_sb"):
-            st.markdown("**Nuevo Usuario**")
-            nu_id = st.text_input("Usuario (ID)*")
-            nu_nombre = st.text_input("Nombre*")
-            nu_apellido = st.text_input("Apellido*")
-            nu_pwd = st.text_input("Contraseña*", type="password")
-            nu_role = st.selectbox("Perfil*", ["operador", "admin"])
-            if st.form_submit_button("➕ Crear", type="primary", use_container_width=True):
-                if nu_id and nu_nombre and nu_apellido and nu_pwd:
-                    users_db = load_users()
-                    if nu_id.strip() in users_db:
-                        st.error("El ID ya existe.")
-                    else:
-                        users_db[nu_id.strip()] = {
-                            "nombre": nu_nombre.strip(),
-                            "apellido": nu_apellido.strip(),
-                            "role": nu_role,
-                            "hash": hashlib.sha256(nu_pwd.encode('utf-8')).hexdigest()
-                        }
-                        save_users(users_db)
-                        st.success(f"Creado: {nu_id}")
-                        st.rerun()
-                else:
-                    st.warning("Completa los campos (*)")
+    if "current_page" not in st.session_state:
+        st.session_state["current_page"] = "main"
         
-        st.markdown("**Usuarios Activos**")
-        users_db = load_users()
-        lista_usuarios = [{"ID": uid, "Perfil": udata.get('role','').upper()} for uid, udata in users_db.items()]
-        st.dataframe(pd.DataFrame(lista_usuarios), use_container_width=True, hide_index=True)
-        
-        st.markdown("**Eliminar Usuario**")
-        del_id = st.text_input("ID a eliminar", key="del_user")
-        if st.button("🗑️ Eliminar", type="primary", use_container_width=True, key="del_user_btn"):
-            if del_id == "SAdmin":
-                st.error("No se puede eliminar SAdmin.")
-            elif del_id in users_db:
-                del users_db[del_id]
-                save_users(users_db)
-                st.success("Eliminado.")
-                st.rerun()
-            else:
-                st.error("No existe.")
+    btn_label = "🔙 Volver al Panel Principal" if st.session_state["current_page"] == "users" else "👥 Gestión de Usuarios"
+    if st.sidebar.button(btn_label, use_container_width=True, type="primary"):
+        st.session_state["current_page"] = "main" if st.session_state["current_page"] == "users" else "users"
+        st.rerun()
 
 if st.session_state.get("role") in ["admin", "sadmin"]:
     with st.sidebar.expander("⚙️ Ajustes"):
@@ -783,9 +746,61 @@ def mostrar_historial_kpi():
         st.info("Aún no se han registrado cierres de día en la base de datos histórica.")
 
 # ==============================================================================
-# 7. DASHBOARD INTERACTIVO PRINCIPAL
+# 7. DASHBOARD INTERACTIVO PRINCIPAL O GESTIÓN DE USUARIOS
 # ==============================================================================
-if st.session_state["history"]:
+if st.session_state.get("current_page") == "users" and st.session_state.get("role") == "sadmin":
+    st.markdown("### 👥 Administración de Usuarios")
+    st.markdown("Crea o elimina credenciales de acceso para tu equipo.")
+    
+    c_u1, c_u2 = st.columns([1, 1.5])
+    
+    with c_u1:
+        with st.form("new_user_form_main"):
+            st.subheader("Crear Nuevo Usuario")
+            nu_id = st.text_input("Usuario (ID de Acceso)*")
+            nu_nombre = st.text_input("Nombre*")
+            nu_apellido = st.text_input("Apellido*")
+            nu_pwd = st.text_input("Contraseña*", type="password")
+            nu_role = st.selectbox("Tipo de Perfil*", ["operador", "admin"])
+            
+            if st.form_submit_button("➕ Registrar Usuario", type="primary"):
+                if nu_id and nu_nombre and nu_apellido and nu_pwd:
+                    users_db = load_users()
+                    if nu_id.strip() in users_db:
+                        st.error(f"El ID '{nu_id}' ya existe.")
+                    else:
+                        users_db[nu_id.strip()] = {
+                            "nombre": nu_nombre.strip(),
+                            "apellido": nu_apellido.strip(),
+                            "role": nu_role,
+                            "hash": hashlib.sha256(nu_pwd.encode('utf-8')).hexdigest()
+                        }
+                        save_users(users_db)
+                        st.success(f"Usuario {nu_id} creado correctamente.")
+                        st.rerun()
+                else:
+                    st.warning("Completa todos los campos obligatorios (*).")
+    
+    with c_u2:
+        st.subheader("Usuarios Activos")
+        users_db = load_users()
+        lista_usuarios = [{"ID Acceso": uid, "Nombre": f"{udata.get('nombre','')} {udata.get('apellido','')}", "Perfil": udata.get('role','').upper()} for uid, udata in users_db.items()]
+        st.dataframe(pd.DataFrame(lista_usuarios), use_container_width=True, hide_index=True)
+        
+        with st.expander("🗑️ Eliminar un Usuario"):
+            del_id = st.text_input("Escribe el ID del usuario a eliminar (No puedes eliminar a SAdmin)")
+            if st.button("Eliminar Usuario", type="primary"):
+                if del_id == "SAdmin":
+                    st.error("No se puede eliminar la cuenta principal de SuperAdmin.")
+                elif del_id in users_db:
+                    del users_db[del_id]
+                    save_users(users_db)
+                    st.success(f"Usuario {del_id} eliminado.")
+                    st.rerun()
+                else:
+                    st.error("El usuario no existe.")
+
+elif st.session_state["history"]:
     available_days = sorted(list(st.session_state["history"].keys()))
     selected_day = st.sidebar.selectbox("📅 Seleccionar Reporte de Servidor", available_days)
     
@@ -1379,7 +1394,7 @@ if st.session_state["history"]:
                                 guardados += 1
                                 
                         if guardados > 0:
-                            save_justificaciones(st.session_state["justificaciones_admin"])
+                            save_db(st.session_state["justificaciones_admin"])
                             st.success(f"✅ Se guardaron {guardados} justificaciones (se autocompletó masivamente por dirección).")
                         
                         if errores_ruta > 0:
