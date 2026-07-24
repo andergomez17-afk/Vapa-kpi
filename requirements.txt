@@ -1,5 +1,6 @@
 streamlit
 pandas
-openpyxl
+numpy
 plotly
-fpdf
+fpdf2
+openpyxl
