@@ -1207,7 +1207,39 @@ if st.session_state["history"]:
                 df_editor['Cliente'] = df_editor.get('Shipper Company', df_editor.get('Shipper Name', 'Desc.'))
                 df_editor['Dirección'] = df_editor.get('CE Recp Address All', 'Desc.')
                 
-                df_editor = df_editor[['Tracking Number', 'Cliente', 'Dirección']].drop_duplicates(subset=['Tracking Number'])
+                # --- LÓGICA MULTIPIEZA ---
+                df_editor['Alerta Multipieza'] = ""
+                if 'Master Tracking Number' in df_bodega.columns and 'Piece Cnt' in df_bodega.columns:
+                    bodega_masters = df_bodega.dropna(subset=['Master Tracking Number'])
+                    # Verificar VAN o POD en toda la bodega
+                    has_v_bodega = bodega_masters.get('VAN All', pd.Series(dtype=str)).astype(str).str.strip().replace('nan', '') != ""
+                    has_p_bodega = bodega_masters.get('POD All', pd.Series(dtype=str)).astype(str).str.strip().replace('nan', '') != ""
+                    
+                    masters_con_movimiento = set(bodega_masters[has_v_bodega | has_p_bodega]['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip())
+                    
+                    def evaluar_multipieza(row):
+                        master = str(row.get('Master Tracking Number', '')).replace('.0', '').strip()
+                        pcs = row.get('Piece Cnt', 1)
+                        try:
+                            pcs = int(float(pcs))
+                        except:
+                            pcs = 1
+                            
+                        if pcs > 1 and master and master != 'nan' and master != '':
+                            if master in masters_con_movimiento:
+                                return "⚠️ Hermana con VAN/POD"
+                            else:
+                                return "❌ Ninguna tiene VAN/POD"
+                        return ""
+                    
+                    df_editor['Alerta Multipieza'] = df_editor.apply(evaluar_multipieza, axis=1)
+                # -------------------------
+                
+                columnas_mostrar = ['Tracking Number', 'Cliente', 'Dirección']
+                if 'Alerta Multipieza' in df_editor.columns:
+                    columnas_mostrar.append('Alerta Multipieza')
+                    
+                df_editor = df_editor[columnas_mostrar].drop_duplicates(subset=['Tracking Number'])
                 df_editor['Categoría Operativa'] = None
                 df_editor['Ruta (3 dig)'] = ""
                 
@@ -1230,6 +1262,7 @@ if st.session_state["history"]:
                             "Tracking Number": st.column_config.TextColumn(disabled=True),
                             "Cliente": st.column_config.TextColumn(disabled=True),
                             "Dirección": st.column_config.TextColumn(disabled=True),
+                            "Alerta Multipieza": st.column_config.TextColumn(disabled=True),
                         },
                         hide_index=True,
                         use_container_width=True,
