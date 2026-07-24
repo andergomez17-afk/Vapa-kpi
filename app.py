@@ -1211,11 +1211,15 @@ if st.session_state["history"]:
                 df_editor['Alerta Multipieza'] = ""
                 if 'Master Tracking Number' in df_bodega.columns and 'Piece Cnt' in df_bodega.columns:
                     bodega_masters = df_bodega.dropna(subset=['Master Tracking Number'])
-                    # Verificar VAN o POD en toda la bodega
-                    has_v_bodega = bodega_masters.get('VAN All', pd.Series(dtype=str)).astype(str).str.strip().replace('nan', '') != ""
-                    has_p_bodega = bodega_masters.get('POD All', pd.Series(dtype=str)).astype(str).str.strip().replace('nan', '') != ""
-                    has_37 = bodega_masters.get('STAT 37 Latest', pd.Series(dtype=str)).astype(str).str.strip().replace('nan', '') != ""
-                    has_50 = bodega_masters.get('STAT 50 Latest', pd.Series(dtype=str)).astype(str).str.strip().replace('nan', '') != ""
+                    def check_condicion(col):
+                        if col in bodega_masters.columns:
+                            return bodega_masters[col].astype(str).str.strip().replace('nan', '') != ""
+                        return pd.Series(False, index=bodega_masters.index)
+                        
+                    has_v_bodega = check_condicion('VAN All')
+                    has_p_bodega = check_condicion('POD All')
+                    has_37 = check_condicion('STAT 37 Latest')
+                    has_50 = check_condicion('STAT 50 Latest')
                     
                     bodega_masters_clean = bodega_masters.copy()
                     bodega_masters_clean['Master Tracking Number'] = bodega_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
