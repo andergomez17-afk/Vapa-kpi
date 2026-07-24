@@ -1148,29 +1148,27 @@ if st.session_state["history"]:
             st.error("🔒 ACCESO DENEGADO. Solo el equipo de Administración puede modificar el status de la carga estancada y cerrar el día.")
             st.info("Para acceder, debe cerrar sesión e ingresar con la credencial de Administrador.")
         else:
-            c_f1, c_f2 = st.columns([1, 1])
+            st.markdown("#### Panel de Justificación Rápida")
+            st.markdown("Edita directamente sobre la tabla (puedes arrastrar celdas hacia abajo para copiar y pegar rápido como en Excel).")
             
-            with c_f1:
-                st.markdown("#### Panel de Justificación Rápida")
-                st.markdown("Edita directamente sobre la tabla (puedes arrastrar celdas hacia abajo para copiar y pegar rápido como en Excel).")
+            todos_justificados = [str(k).strip() for k in st.session_state["justificaciones_admin"].keys()]
+            is_any_justified = clean_trk_bodega.isin(todos_justificados)
+            
+            df_fallando_base = df_bodega[~has_stat_bodega & ~has_dex_excl & ~is_any_justified].dropna(subset=['Tracking Number']).copy()
+            
+            if df_fallando_base.empty:
+                st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación en la base actual.")
+            else:
+                df_editor = df_fallando_base.copy()
+                df_editor['Tracking Number'] = df_editor['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                df_editor['Cliente'] = df_editor.get('Shipper Company', df_editor.get('Shipper Name', 'Desc.'))
+                df_editor['Dirección'] = df_editor.get('CE Recp Address All', 'Desc.')
                 
-                todos_justificados = [str(k).strip() for k in st.session_state["justificaciones_admin"].keys()]
-                is_any_justified = clean_trk_bodega.isin(todos_justificados)
+                df_editor = df_editor[['Tracking Number', 'Cliente', 'Dirección']].drop_duplicates(subset=['Tracking Number'])
+                df_editor['Categoría Operativa'] = None
+                df_editor['Ruta (3 dig)'] = ""
                 
-                df_fallando_base = df_bodega[~has_stat_bodega & ~has_dex_excl & ~is_any_justified].dropna(subset=['Tracking Number']).copy()
-                
-                if df_fallando_base.empty:
-                    st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación en la base actual.")
-                else:
-                    df_editor = df_fallando_base.copy()
-                    df_editor['Tracking Number'] = df_editor['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-                    df_editor['Cliente'] = df_editor.get('Shipper Company', df_editor.get('Shipper Name', 'Desc.'))
-                    df_editor['Dirección'] = df_editor.get('CE Recp Address All', 'Desc.')
-                    
-                    df_editor = df_editor[['Tracking Number', 'Cliente', 'Dirección']].drop_duplicates(subset=['Tracking Number'])
-                    df_editor['Categoría Operativa'] = None
-                    df_editor['Ruta (3 dig)'] = ""
-                    
+                with st.form("editor_form"):
                     edited_df = st.data_editor(
                         df_editor,
                         column_config={
@@ -1190,13 +1188,13 @@ if st.session_state["history"]:
                             "Cliente": st.column_config.TextColumn(disabled=True),
                             "Dirección": st.column_config.TextColumn(disabled=True),
                         },
-                        hide_index=True,
-                        use_container_width=True,
-                        height=400,
-                        key="admin_data_editor"
-                    )
-                    
-                    if st.button("💾 Guardar Justificaciones Editadas", type="primary", use_container_width=True):
+                    hide_index=True,
+                    use_container_width=True,
+                    height=550,
+                    key="admin_data_editor"
+                )
+                
+                if st.form_submit_button("💾 Guardar Justificaciones Editadas", type="primary", use_container_width=True):
                         cambios = edited_df.dropna(subset=["Categoría Operativa"])
                         cambios = cambios[cambios["Categoría Operativa"].astype(str).str.strip() != ""]
                         
@@ -1231,29 +1229,33 @@ if st.session_state["history"]:
                                 guardados += 1
                                 
                         if guardados > 0:
-                            save_db(st.session_state["justificaciones_admin"])
-                            st.success(f"✅ Se guardaron {guardados} justificaciones (se autocompletó masivamente por dirección). Refresca la tabla para ver el impacto.")
+                            save_justificaciones(st.session_state["justificaciones_admin"])
+                            st.success(f"✅ Se guardaron {guardados} justificaciones (se autocompletó masivamente por dirección).")
+                        
                         if errores_ruta > 0:
                             st.warning(f"⚠️ {errores_ruta} guías no se procesaron porque exigían un número de Ruta de exactamente 3 dígitos.")
-            
-            with c_f2:
-                st.markdown("#### Historial Activo de Carga Justificada")
-                if st.session_state["justificaciones_admin"]:
-                    datos_just = []
-                    for k, v in st.session_state["justificaciones_admin"].items():
-                        estado = v.get("estado", "")
-                        impacto = "❌ Sigue en Fallo" if estado == "Sin movimiento" else "✅ Perdonado del KPI"
-                        datos_just.append({
-                            "Tracking": k, 
-                            "Cliente": v.get("cliente", "N/A"),
-                            "Categoría": estado, 
-                            "Ruta": v.get("ruta", ""), 
-                            "KPI": impacto
-                        })
                         
-                    st.dataframe(pd.DataFrame(datos_just), use_container_width=True, hide_index=True)
-                else:
-                    st.info("Aún no se han registrado justificaciones en la Base de Datos.")
+                        st.rerun()
+
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            st.markdown("#### 🗃️ Historial Activo de Carga Justificada")
+            
+            if st.session_state.get("justificaciones_admin"):
+                datos_just = []
+                for k, v in st.session_state["justificaciones_admin"].items():
+                    estado = v.get("estado", "")
+                    impacto = "❌ Sigue en Fallo" if estado == "Sin movimiento" else "✅ Perdonado del KPI"
+                    datos_just.append({
+                        "Tracking": k, 
+                        "Cliente": v.get("cliente", "N/A"),
+                        "Categoría": estado, 
+                        "Ruta": v.get("ruta", ""), 
+                        "KPI": impacto
+                    })
+                    
+                st.dataframe(pd.DataFrame(datos_just), use_container_width=True, hide_index=True)
+            else:
+                st.info("Aún no se han registrado justificaciones en la Base de Datos.")
 
             st.divider()
             
