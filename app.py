@@ -60,7 +60,7 @@ COURIERS = {
     "6269970": "Jose Caicedo",
     "6269972": "Julio Lobos",
     "6568276": "Raul Ceballos",
-    "9836295": "Javier Gana",
+    "9836296": "Javier Gana",
     "9711646": "Williams Piña",
     "9601562": "Yeison Gonzalez",
     "9789500": "Jose Gutierrez",
@@ -1334,15 +1334,6 @@ elif st.session_state["history"]:
                     has_v_bodega = check_condicion('VAN All')
                     has_p_bodega = check_condicion('POD All')
                     
-                    has_37 = check_condicion('STAT 37 Latest')
-                    has_50 = check_condicion('STAT 50 Latest')
-                    has_53 = check_condicion('STAT 53 All')
-                    has_44 = check_condicion('STAT 44 Date Time Latest')
-                    fecha_hoy_pegada = datetime.now().strftime("%d%m%Y")
-                    has_44_hoy = has_44 & vapa_masters.get('STAT 44 Date Time Latest', pd.Series(dtype=str)).astype(str).str.contains(fecha_hoy_pegada, regex=False, na=False)
-                    
-                    has_estacion_stat = has_37 | has_50 | has_53 | has_44_hoy
-                    
                     vapa_masters_clean = vapa_masters.copy()
                     vapa_masters_clean['Master Tracking Number'] = vapa_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                     
@@ -1352,7 +1343,17 @@ elif st.session_state["history"]:
                     else:
                         dict_movimiento = {}
                         
-                    set_estacion = set(vapa_masters_clean[has_estacion_stat]['Master Tracking Number'])
+                    bodega_estatica = vapa_masters_clean[~(has_v_bodega | has_p_bodega)].copy()
+                    if not bodega_estatica.empty:
+                        if 'Status' in bodega_estatica.columns:
+                            bodega_estatica['Estado_Reciente'] = bodega_estatica['Status']
+                        elif 'status' in bodega_estatica.columns:
+                            bodega_estatica['Estado_Reciente'] = bodega_estatica['status']
+                        else:
+                            bodega_estatica['Estado_Reciente'] = "Sin movimiento"
+                        dict_estado = bodega_estatica.groupby('Master Tracking Number').first()[['Estado_Reciente']].to_dict(orient='index')
+                    else:
+                        dict_estado = {}
                     
                     def evaluar_multipieza(row):
                         master = str(row.get('Master Tracking Number', '')).replace('.0', '').strip()
@@ -1369,10 +1370,13 @@ elif st.session_state["history"]:
                                     return "⚠️ Otras partes en ruta"
                                 else:
                                     return f"⚠️ Otras partes en ruta ({chofer})"
-                            elif master in set_estacion:
-                                return "⚠️ En Estación (Stat aplicado)"
                             else:
-                                return "❌ Sin movimiento"
+                                estado_reciente = "Sin movimiento"
+                                if master in dict_estado:
+                                    est = str(dict_estado[master].get('Estado_Reciente', '')).strip()
+                                    if est and est != 'nan':
+                                        estado_reciente = est
+                                return f"ℹ️ {estado_reciente}"
                         return ""
                     
                     df_editor['Alerta Multipieza'] = df_editor.apply(evaluar_multipieza, axis=1)
