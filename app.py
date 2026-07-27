@@ -898,13 +898,15 @@ elif st.session_state["history"]:
     def check_col(df, col_name, substr=None):
         if col_name not in df.columns: return pd.Series(False, index=df.index)
         if substr: return df[col_name].astype(str).str.contains(substr, regex=True, na=False)
-        return df[col_name].notna() & (df[col_name].astype(str).str.strip() != "")
+        s = df[col_name].astype(str).str.strip().str.lower()
+        basura = ["", "nan", "none", "nat", "null", "<na>", "0", "0.0", "-", "false", "n/a", "na", "nd", "n/d"]
+        return ~s.isin(basura)
 
     has_sip = pd.Series(False, index=df_vapa.index)
     if 'SIPS Date Time Loc Latest' in df_vapa.columns:
-        has_sip = has_sip | df_vapa['SIPS Date Time Loc Latest'].notna()
+        has_sip = has_sip | check_col(df_vapa, 'SIPS Date Time Loc Latest')
     elif 'SIP All' in df_vapa.columns:
-        has_sip = has_sip | df_vapa['SIP All'].notna()
+        has_sip = has_sip | check_col(df_vapa, 'SIP All')
         
     has_van = check_col(df_vapa, 'VAN All')
     has_pod = check_col(df_vapa, 'POD All')
