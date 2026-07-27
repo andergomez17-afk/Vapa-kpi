@@ -1120,7 +1120,7 @@ elif st.session_state["history"]:
     
     metricas_ordenadas = sorted(metricas_operativas, key=lambda x: x["cantidad"], reverse=True)
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin", "📅 Historial KPI"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📊 Panel Operativo", "📋 Base de Datos", "🚨 Alertas de Riesgo", "🛠️ Gestión Admin", "📅 Historial KPI", "🔗 Sistema Externo"])
     
     with tab1:
         st.markdown("### Resumen de Excepciones e Inventario")
@@ -1579,6 +1579,53 @@ elif st.session_state["history"]:
 
     with tab5:
         mostrar_historial_kpi()
+
+    with tab6:
+        st.markdown("### 🔗 Cruce de Sistema Externo")
+        st.markdown("Carga aquí el reporte de tu otro sistema. VAPA lo cruzará automáticamente con el inventario de FedEx actual para limpiar los bultos que ya tienes gestionados, dejándote únicamente los registros verdaderamente nuevos.")
+        
+        uploaded_externo = st.file_uploader("📂 Subir Reporte Externo (.xlsx, .csv)", type=["xlsx", "csv"], key="uploader_externo")
+        if uploaded_externo:
+            try:
+                if uploaded_externo.name.endswith(".csv"):
+                    df_ext = pd.read_csv(uploaded_externo)
+                else:
+                    df_ext = pd.read_excel(uploaded_externo)
+                
+                posibles_columnas = ["Tracking Number", "Guia", "Tracking", "Master Tracking Number", "Guía", "TRACKING"]
+                col_track = next((c for c in df_ext.columns if str(c).upper() in [x.upper() for x in posibles_columnas]), df_ext.columns[0])
+                
+                st.info(f"Usando la columna **'{col_track}'** del archivo externo como identificador para el cruce.")
+                
+                if 'Tracking Number' in df_vapa.columns:
+                    trk_vapa = df_vapa['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().tolist()
+                else:
+                    trk_vapa = []
+                    
+                df_ext['Cruce_ID'] = df_ext[col_track].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                
+                # Filtrar: Dejar solo los que NO están en VAPA
+                df_ext_nuevos = df_ext[~df_ext['Cruce_ID'].isin(trk_vapa)].copy()
+                df_ext_nuevos = df_ext_nuevos.drop(columns=['Cruce_ID'])
+                
+                duplicados = len(df_ext) - len(df_ext_nuevos)
+                
+                st.success(f"✅ ¡Cruce Exitoso! Se eliminaron {duplicados} registros duplicados (ya existentes en FedEx). Quedan {len(df_ext_nuevos)} registros nuevos por gestionar.")
+                
+                st.dataframe(df_ext_nuevos, use_container_width=True)
+                
+                if not df_ext_nuevos.empty:
+                    csv_ext = df_ext_nuevos.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button(
+                        label="📥 Descargar Nuevos Registros (CSV)",
+                        data=csv_ext,
+                        file_name=f"Registros_Nuevos_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        type="primary"
+                    )
+            except Exception as e:
+                st.error(f"Error procesando el archivo: {e}")
 
 
 
