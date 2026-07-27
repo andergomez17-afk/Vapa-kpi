@@ -1367,16 +1367,16 @@ elif st.session_state["history"]:
                             if master in dict_movimiento:
                                 chofer = dict_movimiento[master].get('Chofer Asignado', 'No Identificado')
                                 if chofer == "No Identificado":
-                                    return "⚠️ Otras partes en ruta"
+                                    return "⚠️ Otras partes con VAN/POD en ruta (Chofer no identificado)"
                                 else:
-                                    return f"⚠️ Otras partes en ruta ({chofer})"
+                                    return f"⚠️ Otras partes las lleva con VAN/POD el chofer {chofer}"
                             else:
-                                estado_reciente = "Sin movimiento"
+                                estado_reciente = "Desconocido"
                                 if master in dict_estado:
                                     est = str(dict_estado[master].get('Estado_Reciente', '')).strip()
                                     if est and est != 'nan':
                                         estado_reciente = est
-                                return f"ℹ️ {estado_reciente}"
+                                return f"ℹ️ Otras partes en estado: {estado_reciente}"
                         return ""
                     
                     df_editor['Alerta Multipieza'] = df_editor.apply(evaluar_multipieza, axis=1)
