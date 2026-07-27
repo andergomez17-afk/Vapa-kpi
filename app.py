@@ -1401,13 +1401,13 @@ elif st.session_state["history"]:
                                     nombre_corto = chofer.split("(")[0].strip()
                                     return f"📦 {num} parte(s) procesada(s) en Gestión y Devoluciones por {nombre_corto}"
                                 elif chofer == "No Identificado":
-                                    return f"✅ {num} parte(s) entregada(s) (Chofer no identificado)"
+                                    return f"⚠️ {num} parte(s) (Revisar)"
                                 else:
                                     return f"✅ {num} parte(s) entregada(s) por el chofer {chofer}"
                             elif master in ruta_chofer:
                                 chofer = ruta_chofer[master].get('Chofer Asignado', 'No Identificado')
                                 if chofer == "No Identificado":
-                                    return "⚠️ Otras partes con VAN en ruta (Chofer no identificado)"
+                                    return "⚠️ Otras partes con VAN en ruta (Revisar)"
                                 elif "Gestión y Devoluciones" in chofer:
                                     nombre_corto = chofer.split("(")[0].strip()
                                     return f"📦 Otras partes están en Gestión y Devoluciones ({nombre_corto})"
