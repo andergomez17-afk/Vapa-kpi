@@ -1332,7 +1332,8 @@ elif st.session_state["history"]:
                     def check_condicion(col):
                         if col in vapa_masters.columns:
                             s = vapa_masters[col].astype(str).str.strip().str.lower()
-                            return (s != "") & (s != "nan") & (s != "none") & (s != "nat") & (s != "null") & (s != "<na>")
+                            basura = ["", "nan", "none", "nat", "null", "<na>", "0", "0.0", "-", "false", "n/a", "na", "nd", "n/d"]
+                            return ~s.isin(basura)
                         return pd.Series(False, index=vapa_masters.index)
                         
                     has_v_bodega = check_condicion('VAN All')
