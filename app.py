@@ -950,6 +950,8 @@ elif st.session_state["history"]:
 
     if not df_pod_sin_van.empty: df_pod_sin_van['Motivo de Falla'] = 'Tiene POD sin VAN'
     m_pod_sin_van = len(df_pod_sin_van)
+    
+    st.warning(f"DEBUG: has_sip: {has_sip.sum()}, has_van: {has_van.sum()}, has_pod: {has_pod.sum()}, falla_sin_sip: {falla_sin_sip.sum()}, falla_pod_sin_van: {falla_pod_sin_van.sum()}")
 
     # Regla 3: Solo STAT 44 aplicado HOY y en estación (Sin Van/Pod)
     filtro_44_estacion = has_44_hoy & ~(has_van | has_pod)
