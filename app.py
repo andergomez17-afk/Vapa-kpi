@@ -1331,7 +1331,8 @@ elif st.session_state["history"]:
                     vapa_masters = df_vapa.dropna(subset=['Master Tracking Number'])
                     def check_condicion(col):
                         if col in vapa_masters.columns:
-                            return vapa_masters[col].astype(str).str.strip().replace('nan', '') != ""
+                            s = vapa_masters[col].astype(str).str.strip().str.lower()
+                            return (s != "") & (s != "nan") & (s != "none") & (s != "nat") & (s != "null") & (s != "<na>")
                         return pd.Series(False, index=vapa_masters.index)
                         
                     has_v_bodega = check_condicion('VAN All')
