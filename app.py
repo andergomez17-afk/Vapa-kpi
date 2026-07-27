@@ -1312,18 +1312,55 @@ elif st.session_state["history"]:
             st.markdown("#### Panel de Justificación Rápida")
             st.markdown("Edita directamente sobre la tabla (puedes arrastrar celdas hacia abajo para copiar y pegar rápido como en Excel).")
             
+            st.markdown("#### 🔗 Subir Revisión para Gestionar")
+            uploaded_rev = st.file_uploader("📂 Cargar archivo externo (eliminaremos los duplicados automáticamente)", type=["xlsx", "csv"], key="upl_revision")
+            if uploaded_rev:
+                try:
+                    df_ext = pd.read_csv(uploaded_rev) if uploaded_rev.name.endswith(".csv") else pd.read_excel(uploaded_rev)
+                    col_track = next((c for c in df_ext.columns if str(c).upper() in ["TRACKING NUMBER", "GUIA", "TRACKING", "MASTER TRACKING NUMBER", "GUÍA"]), df_ext.columns[0])
+                    df_ext['Tracking Number'] = df_ext[col_track].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                    df_ext['Cliente'] = df_ext.get('Cliente', df_ext.get('Shipper Company', df_ext.get('Shipper Name', 'Sistema Externo')))
+                    df_ext['Dirección'] = df_ext.get('Dirección', df_ext.get('CE Recp Address All', 'Desc.'))
+                    
+                    if "carga_externa_rev" not in st.session_state:
+                        st.session_state["carga_externa_rev"] = pd.DataFrame(columns=['Tracking Number', 'Cliente', 'Dirección'])
+                    
+                    trk_existentes = clean_trk_bodega.tolist() + st.session_state["carga_externa_rev"]['Tracking Number'].tolist()
+                    df_ext_nuevos = df_ext[~df_ext['Tracking Number'].isin(trk_existentes)][['Tracking Number', 'Cliente', 'Dirección']]
+                    
+                    if not df_ext_nuevos.empty:
+                        st.session_state["carga_externa_rev"] = pd.concat([st.session_state["carga_externa_rev"], df_ext_nuevos]).drop_duplicates(subset=['Tracking Number'])
+                        st.success(f"✅ Se añadieron {len(df_ext_nuevos)} nuevos registros a la gestión administrativa (los duplicados fueron ignorados).")
+                    else:
+                        st.info("Todos los registros del archivo ya estaban en la gestión o en VAPA.")
+                except Exception as e:
+                    st.error(f"Error cargando archivo: {e}")
+            
             todos_justificados = [str(k).strip() for k in st.session_state["justificaciones_admin"].keys()]
             is_any_justified = clean_trk_bodega.isin(todos_justificados)
             
             df_fallando_base = df_bodega[~has_stat_bodega & ~has_dex_excl & ~is_any_justified].dropna(subset=['Tracking Number']).copy()
+            
+            if "carga_externa_rev" in st.session_state and not st.session_state["carga_externa_rev"].empty:
+                pendientes_ext = st.session_state["carga_externa_rev"][~st.session_state["carga_externa_rev"]['Tracking Number'].isin(todos_justificados)]
+                if not pendientes_ext.empty:
+                    df_fallando_base = pd.concat([df_fallando_base, pendientes_ext], ignore_index=True)
             
             if df_fallando_base.empty:
                 st.success("🎉 ¡Excelente! No hay bultos pendientes de justificación en la base actual.")
             else:
                 df_editor = df_fallando_base.copy()
                 df_editor['Tracking Number'] = df_editor['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
-                df_editor['Cliente'] = df_editor.get('Shipper Company', df_editor.get('Shipper Name', 'Desc.'))
-                df_editor['Dirección'] = df_editor.get('CE Recp Address All', 'Desc.')
+                
+                if 'Cliente' not in df_editor.columns:
+                    df_editor['Cliente'] = df_editor.get('Shipper Company', df_editor.get('Shipper Name', 'Desc.'))
+                else:
+                    df_editor['Cliente'] = df_editor['Cliente'].fillna(df_editor.get('Shipper Company', df_editor.get('Shipper Name', 'Desc.')))
+                    
+                if 'Dirección' not in df_editor.columns:
+                    df_editor['Dirección'] = df_editor.get('CE Recp Address All', 'Desc.')
+                else:
+                    df_editor['Dirección'] = df_editor['Dirección'].fillna(df_editor.get('CE Recp Address All', 'Desc.'))
                 
                 # --- LÓGICA MULTIPIEZA ---
                 df_editor['Alerta Multipieza'] = ""
