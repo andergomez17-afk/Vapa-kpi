@@ -66,7 +66,10 @@ COURIERS = {
     "9789500": "Jose Gutierrez",
     "9762038": "Carlos Soto",
     "1019905": "Patricio Troncoso",
-    "2588350": "Luis pinto"
+    "2588350": "Luis pinto",
+    "9774226": "Solange Tapia (Punto de Venta)",
+    "3636409": "Rodrigo Cruces (Gestión y Devoluciones)",
+    "3636988": "Mauricio Marquez (Gestión y Devoluciones)"
 }
 
 # Crear carpeta de subidas si no existe
@@ -1378,6 +1381,9 @@ elif st.session_state["history"]:
                                 chofer = entregadas_chofer[master].get('Chofer Asignado', 'No Identificado')
                                 if chofer == "Solange Tapia (Punto de Venta)":
                                     return f"✅ {num} parte(s) entregada(s) por Solange en Punto de Venta"
+                                elif "Gestión y Devoluciones" in chofer:
+                                    nombre_corto = chofer.split("(")[0].strip()
+                                    return f"📦 {num} parte(s) procesada(s) en Gestión y Devoluciones por {nombre_corto}"
                                 elif chofer == "No Identificado":
                                     return f"✅ {num} parte(s) entregada(s) (Chofer no identificado)"
                                 else:
@@ -1386,6 +1392,9 @@ elif st.session_state["history"]:
                                 chofer = ruta_chofer[master].get('Chofer Asignado', 'No Identificado')
                                 if chofer == "No Identificado":
                                     return "⚠️ Otras partes con VAN en ruta (Chofer no identificado)"
+                                elif "Gestión y Devoluciones" in chofer:
+                                    nombre_corto = chofer.split("(")[0].strip()
+                                    return f"📦 Otras partes están en Gestión y Devoluciones ({nombre_corto})"
                                 else:
                                     return f"⚠️ Otras partes las lleva con VAN el chofer {chofer}"
                             else:
