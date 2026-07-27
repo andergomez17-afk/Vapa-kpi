@@ -898,15 +898,13 @@ elif st.session_state["history"]:
     def check_col(df, col_name, substr=None):
         if col_name not in df.columns: return pd.Series(False, index=df.index)
         if substr: return df[col_name].astype(str).str.contains(substr, regex=True, na=False)
-        s = df[col_name].astype(str).str.strip().str.lower()
-        basura = ["", "nan", "none", "nat", "null", "<na>", "0", "0.0", "-", "false", "n/a", "na", "nd", "n/d"]
-        return ~s.isin(basura)
+        return df[col_name].notna() & (df[col_name].astype(str).str.strip() != "")
 
     has_sip = pd.Series(False, index=df_vapa.index)
     if 'SIPS Date Time Loc Latest' in df_vapa.columns:
-        has_sip = has_sip | check_col(df_vapa, 'SIPS Date Time Loc Latest')
+        has_sip = has_sip | df_vapa['SIPS Date Time Loc Latest'].notna()
     elif 'SIP All' in df_vapa.columns:
-        has_sip = has_sip | check_col(df_vapa, 'SIP All')
+        has_sip = has_sip | df_vapa['SIP All'].notna()
         
     has_van = check_col(df_vapa, 'VAN All')
     has_pod = check_col(df_vapa, 'POD All')
@@ -930,8 +928,8 @@ elif st.session_state["history"]:
     if not df_sin_sip_temp.empty: 
         df_sin_sip_temp['Motivo de Falla'] = 'Falta SIP'
         df_sin_sip_temp['Status'] = df_sin_sip_temp.apply(estado_sin_sip_format, axis=1)
-        # Mostrar TODOS los bultos, incluso si el chofer no está identificado
-        df_sin_sip = df_sin_sip_temp.copy()
+        # Ignorar si se escaneó internamente sin chofer (ej. punto de venta, of. interna)
+        df_sin_sip = df_sin_sip_temp[df_sin_sip_temp['Chofer Asignado'] != 'No Identificado'].copy()
     else:
         df_sin_sip = df_sin_sip_temp
     
@@ -941,18 +939,15 @@ elif st.session_state["history"]:
     falla_pod_sin_van = has_pod & ~has_van
     df_pod_sin_van_temp = df_vapa[falla_pod_sin_van].copy()
     
-    # Exclusión definitiva: Antes se excluía, ahora mostraremos todos
+    # Exclusión definitiva: Solo aquellos con un Chofer Identificado
     if not df_pod_sin_van_temp.empty:
-        df_pod_sin_van = df_pod_sin_van_temp.copy()
+        es_identificado = df_pod_sin_van_temp['Chofer Asignado'] != 'No Identificado'
+        df_pod_sin_van = df_pod_sin_van_temp[es_identificado].copy()
     else:
         df_pod_sin_van = df_pod_sin_van_temp
 
     if not df_pod_sin_van.empty: df_pod_sin_van['Motivo de Falla'] = 'Tiene POD sin VAN'
     m_pod_sin_van = len(df_pod_sin_van)
-    
-    st.error(f"DEBUG CRÍTICO -> Total df_vapa: {len(df_vapa)}, has_sip: {has_sip.sum()}, has_van: {has_van.sum()}, has_pod: {has_pod.sum()}, falla_sin_sip: {falla_sin_sip.sum()}, falla_pod_sin_van: {falla_pod_sin_van.sum()}")
-    
-    st.warning(f"DEBUG: has_sip: {has_sip.sum()}, has_van: {has_van.sum()}, has_pod: {has_pod.sum()}, falla_sin_sip: {falla_sin_sip.sum()}, falla_pod_sin_van: {falla_pod_sin_van.sum()}")
 
     # Regla 3: Solo STAT 44 aplicado HOY y en estación (Sin Van/Pod)
     filtro_44_estacion = has_44_hoy & ~(has_van | has_pod)
