@@ -1324,12 +1324,12 @@ elif st.session_state["history"]:
                 
                 # --- LÓGICA MULTIPIEZA ---
                 df_editor['Alerta Multipieza'] = ""
-                if 'Master Tracking Number' in df_bodega.columns and 'Piece Cnt' in df_bodega.columns:
-                    bodega_masters = df_bodega.dropna(subset=['Master Tracking Number'])
+                if 'Master Tracking Number' in df_vapa.columns and 'Piece Cnt' in df_vapa.columns:
+                    vapa_masters = df_vapa.dropna(subset=['Master Tracking Number'])
                     def check_condicion(col):
-                        if col in bodega_masters.columns:
-                            return bodega_masters[col].astype(str).str.strip().replace('nan', '') != ""
-                        return pd.Series(False, index=bodega_masters.index)
+                        if col in vapa_masters.columns:
+                            return vapa_masters[col].astype(str).str.strip().replace('nan', '') != ""
+                        return pd.Series(False, index=vapa_masters.index)
                         
                     has_v_bodega = check_condicion('VAN All')
                     has_p_bodega = check_condicion('POD All')
@@ -1339,20 +1339,20 @@ elif st.session_state["history"]:
                     has_53 = check_condicion('STAT 53 All')
                     has_44 = check_condicion('STAT 44 Date Time Latest')
                     fecha_hoy_pegada = datetime.now().strftime("%d%m%Y")
-                    has_44_hoy = has_44 & bodega_masters.get('STAT 44 Date Time Latest', pd.Series(dtype=str)).astype(str).str.contains(fecha_hoy_pegada, regex=False, na=False)
+                    has_44_hoy = has_44 & vapa_masters.get('STAT 44 Date Time Latest', pd.Series(dtype=str)).astype(str).str.contains(fecha_hoy_pegada, regex=False, na=False)
                     
                     has_estacion_stat = has_37 | has_50 | has_53 | has_44_hoy
                     
-                    bodega_masters_clean = bodega_masters.copy()
-                    bodega_masters_clean['Master Tracking Number'] = bodega_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                    vapa_masters_clean = vapa_masters.copy()
+                    vapa_masters_clean['Master Tracking Number'] = vapa_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                     
-                    bodega_movimiento = bodega_masters_clean[has_v_bodega | has_p_bodega].copy()
+                    bodega_movimiento = vapa_masters_clean[has_v_bodega | has_p_bodega].copy()
                     if not bodega_movimiento.empty:
                         dict_movimiento = bodega_movimiento.groupby('Master Tracking Number').first()[['Chofer Asignado']].to_dict(orient='index')
                     else:
                         dict_movimiento = {}
                         
-                    set_estacion = set(bodega_masters_clean[has_estacion_stat]['Master Tracking Number'])
+                    set_estacion = set(vapa_masters_clean[has_estacion_stat]['Master Tracking Number'])
                     
                     def evaluar_multipieza(row):
                         master = str(row.get('Master Tracking Number', '')).replace('.0', '').strip()
