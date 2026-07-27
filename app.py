@@ -315,7 +315,7 @@ def extraer_chofer(row):
     if not has_van and not has_pod and (has_44 or has_17):
         return "En Estación"
 
-    texto = str(row.get('VAN All', '')) + " " + str(row.get('POD All', '')) + " " + str(row.get('DEX All', ''))
+    texto = str(row.get('VAN All', '')) + " " + str(row.get('POD All', '')) + " " + str(row.get('DEX All', '')) + " " + str(row.get('STAT 37 Latest', '')) + " " + str(row.get('Status', '')) + " " + str(row.get('status', ''))
     coincidencias = re.findall(r'(\d{6,7})', texto)
     for c in coincidencias:
         if c in COURIERS:
@@ -1355,6 +1355,15 @@ elif st.session_state["history"]:
                     else:
                         ruta_chofer = {}
                         
+                    has_37 = check_condicion('STAT 37 Latest') | vapa_masters_clean.get('Status', pd.Series(dtype=str)).astype(str).str.contains('37', na=False) | vapa_masters_clean.get('status', pd.Series(dtype=str)).astype(str).str.contains('37', na=False)
+                    has_gestion = vapa_masters_clean['Chofer Asignado'].astype(str).str.contains('Gestión y Devoluciones', na=False)
+                    bodega_gestion_37 = vapa_masters_clean[has_37 & has_gestion & ~(has_v_bodega | has_p_bodega)].copy()
+                    if not bodega_gestion_37.empty:
+                        bodega_gestion_37['Num_Gestion'] = 1
+                        gestion_37_count = bodega_gestion_37.groupby('Master Tracking Number')['Num_Gestion'].count().to_dict()
+                    else:
+                        gestion_37_count = {}
+                        
                     bodega_estatica = vapa_masters_clean[~(has_v_bodega | has_p_bodega)].copy()
                     if not bodega_estatica.empty:
                         if 'Status' in bodega_estatica.columns:
@@ -1397,6 +1406,9 @@ elif st.session_state["history"]:
                                     return f"📦 Otras partes están en Gestión y Devoluciones ({nombre_corto})"
                                 else:
                                     return f"⚠️ Otras partes las lleva con VAN el chofer {chofer}"
+                            elif master in gestion_37_count:
+                                num = gestion_37_count[master]
+                                return f"📦 {num} pieza(s) con stat 37 en Gestión y Devoluciones"
                             else:
                                 estado_reciente = "Desconocido"
                                 if master in dict_estado:
