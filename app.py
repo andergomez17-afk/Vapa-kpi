@@ -1333,11 +1333,16 @@ elif st.session_state["history"]:
                         if col in vapa_masters.columns:
                             s = vapa_masters[col].astype(str).str.strip().str.lower()
                             basura = ["", "nan", "none", "nat", "null", "<na>", "0", "0.0", "-", "false", "n/a", "na", "nd", "n/d"]
-                            return ~s.isin(basura)
+                            is_valid = ~s.isin(basura)
+                            return is_valid
                         return pd.Series(False, index=vapa_masters.index)
                         
                     has_v_bodega = check_condicion('VAN All')
                     has_p_bodega = check_condicion('POD All')
+                    
+                    if '874807794529' in vapa_masters.get('Master Tracking Number', pd.Series(dtype=str)).astype(str).values:
+                        debug_pod = vapa_masters[vapa_masters['Master Tracking Number'] == '874807794529']['POD All'].tolist()
+                        st.error(f"DEBUG VALORES POD PARA 874807794529: {debug_pod}")
                     
                     vapa_masters_clean = vapa_masters.copy()
                     vapa_masters_clean['Master Tracking Number'] = vapa_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
