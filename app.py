@@ -327,6 +327,7 @@ class VapaEngine:
         
         if 'Tracking Number' in df.columns:
             df['Tracking Number'] = df['Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            df = df.drop_duplicates(subset=['Tracking Number'], keep='first')
         
         df_vapa = df[df['Dest Loc Cd'].astype(str).str.strip().str.upper() == 'VAPA'].copy()
         
