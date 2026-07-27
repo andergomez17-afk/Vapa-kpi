@@ -1337,11 +1337,20 @@ elif st.session_state["history"]:
                     vapa_masters_clean = vapa_masters.copy()
                     vapa_masters_clean['Master Tracking Number'] = vapa_masters_clean['Master Tracking Number'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                     
-                    bodega_movimiento = vapa_masters_clean[has_v_bodega | has_p_bodega].copy()
-                    if not bodega_movimiento.empty:
-                        dict_movimiento = bodega_movimiento.groupby('Master Tracking Number').first()[['Chofer Asignado']].to_dict(orient='index')
+                    bodega_entregada = vapa_masters_clean[has_p_bodega].copy()
+                    if not bodega_entregada.empty:
+                        bodega_entregada['Num_Entregados'] = 1
+                        entregadas_count = bodega_entregada.groupby('Master Tracking Number')['Num_Entregados'].count().to_dict()
+                        entregadas_chofer = bodega_entregada.groupby('Master Tracking Number').first()[['Chofer Asignado']].to_dict(orient='index')
                     else:
-                        dict_movimiento = {}
+                        entregadas_count = {}
+                        entregadas_chofer = {}
+                        
+                    bodega_ruta = vapa_masters_clean[has_v_bodega & ~has_p_bodega].copy()
+                    if not bodega_ruta.empty:
+                        ruta_chofer = bodega_ruta.groupby('Master Tracking Number').first()[['Chofer Asignado']].to_dict(orient='index')
+                    else:
+                        ruta_chofer = {}
                         
                     bodega_estatica = vapa_masters_clean[~(has_v_bodega | has_p_bodega)].copy()
                     if not bodega_estatica.empty:
@@ -1364,12 +1373,21 @@ elif st.session_state["history"]:
                             pcs = 1
                             
                         if pcs > 1 and master and master != 'nan' and master != '':
-                            if master in dict_movimiento:
-                                chofer = dict_movimiento[master].get('Chofer Asignado', 'No Identificado')
-                                if chofer == "No Identificado":
-                                    return "⚠️ Otras partes con VAN/POD en ruta (Chofer no identificado)"
+                            if master in entregadas_count:
+                                num = entregadas_count[master]
+                                chofer = entregadas_chofer[master].get('Chofer Asignado', 'No Identificado')
+                                if chofer == "Solange Tapia (Punto de Venta)":
+                                    return f"✅ {num} parte(s) entregada(s) por Solange en Punto de Venta"
+                                elif chofer == "No Identificado":
+                                    return f"✅ {num} parte(s) entregada(s) (Chofer no identificado)"
                                 else:
-                                    return f"⚠️ Otras partes las lleva con VAN/POD el chofer {chofer}"
+                                    return f"✅ {num} parte(s) entregada(s) por el chofer {chofer}"
+                            elif master in ruta_chofer:
+                                chofer = ruta_chofer[master].get('Chofer Asignado', 'No Identificado')
+                                if chofer == "No Identificado":
+                                    return "⚠️ Otras partes con VAN en ruta (Chofer no identificado)"
+                                else:
+                                    return f"⚠️ Otras partes las lleva con VAN el chofer {chofer}"
                             else:
                                 estado_reciente = "Desconocido"
                                 if master in dict_estado:
